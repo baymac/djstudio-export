@@ -55,6 +55,13 @@ rekordbox/                      Rekordbox writes via pyrekordbox
   backup.py                     master.db backup before any write
   constants.py                  Path discovery + Camelot/cue-kind constants
 
+apps/                           Frontend apps backed by `dj` CLI commands
+  course/                       Vite + React offline course viewer
+    cli.py                      `dj course start/stop` — spawns vite via portless
+    src/                        React app (TanStack Router, video + quiz playback)
+    vite.config.ts              publicDir = ~/Music/dj-tools/; reads PORT/HOST
+                                env vars set by portless
+
 helpers/                        Standalone maintenance scripts
 tests/                          pytest
 ```
@@ -87,6 +94,10 @@ uv run dj_cli.py detect import-rekordbox-analysis
 uv run dj_cli.py playlist beatport  --query "SELECT beatport_id FROM enriched_tracks WHERE ..." --name "..."
 uv run dj_cli.py playlist rekordbox --query "..." --name "..."
 
+# Course viewer (offline)
+dj course start                                                                         # spawn vite via portless, open https://course.localhost
+dj course stop                                                                          # kill the background process group
+
 # Maintenance
 uv run helpers/cleanup_playlist.py "Playlist Name" --dry-run
 ```
@@ -115,6 +126,14 @@ uv run helpers/cleanup_playlist.py "Playlist Name" --dry-run
 - **`detect gems` review flow — nothing is saved without approval** — after a scan, `review_gems` walks the found tracks one at a time, printing each track's link so the user can listen, then prompts approve / reject / skip / quit. Only **approved** tracks are persisted to `detected_tracks` (via the normal `insert_track` dedup path, so they flow into `enrich` like any other detected track) — that write also creates a `sessions` row (`type='gems'`, synthetic `gems://<source>/<genre>?t=<iso>` URL to satisfy the `UNIQUE(url)` constraint) + a `gem_scans` row + per-track `gem_tracks` rows. **Rejected** tracks go to the `rejected_gems` table instead and never enter the pipeline. **Skipped/undecided** tracks aren't persisted anywhere, so they can reappear in a later scan. `--no-save` shows the results table and skips review entirely (testing only).
 - **Cross-run dedup is content-based, not offset-based** — platform results reshuffle over time, so the next run can't trust a page offset. `db.seen_gem_keys(source, cutoff)` + `db.seen_rejected_gem_keys(source, cutoff)` build a combined exclude set of prior approved + rejected `(artist, title)` keys, and each search pages until `--count` *new* tracks are collected. Both approved and rejected gems with a release date older than the current `--date` cutoff are "faded" (dropped from the comparison set — they can't recur in a window that excludes them anyway); `gem_tracks` and `rejected_gems` are both indexed on `(source, release_date)` for this. Dedup is per-platform — safe because `enrich`'s `upsert_enriched` collapses cross-platform duplicates by `beatport_id`.
 - **Per-platform gem signal differs** — Beatport filters by exact `genre_id` (only authoritative genre source) and drops Hype (label-paid promotion) tracks since it has no public play count; SoundCloud filters `playback_count < 5000`; Spotify mines editorial playlists by `popularity` (its `genre:` search filter is unreliable for sub-genres); Bandcamp filters by uploader `tag_norm_names` via `discover/1/discover_web` (the older `discover/3/get_web` silently ignored the tag param, returning every genre). Genre IDs / tag mappings live in `detect/gems.py` — extend `_BEATPORT_GENRE_IDS` / `GENRES` to add genres.
+
+### Apps (`dj course`)
+
+- **`apps/<name>/cli.py` pattern** — each frontend app gets a sibling Python CLI that's mounted into `dj_cli.py` as a top-level subcommand (`dj course start/stop`). `apps/` is a Python package (has `__init__.py`) and must be listed in `pyproject.toml`'s `[tool.setuptools.packages.find]` `include` array, otherwise the installed `dj` script in `.venv/bin/` raises `ModuleNotFoundError: No module named 'apps'` even though `uv run dj_cli.py` works.
+- **portless wrapping** — `dj course start` runs `npx portless course npm run dev` in a new process group (`start_new_session=True` so `pid == pgid`; stop kills the whole group with `os.killpg`). Portless picks a free port, sets `PORT=<port> HOST=127.0.0.1` env vars, then exec's the dev command. `apps/course/vite.config.ts` reads those env vars (`process.env.PORT/HOST`) so vite binds to portless's port; if vite ignores them (the default) the proxy gets a 502 because portless registers one port and vite picks another.
+- **stdout piped to a log file, not DEVNULL** — portless detects the dev server's URL by parsing its stdout. If we redirect to `subprocess.DEVNULL` portless can't see the "Local: …" line and ends up routing to a random port → 502. The CLI redirects to `~/Music/dj-tools/logs/course/YYYYMMDD_HHMMSS.log` so portless still sees the output. After startup the URL is extracted from the same log with a `-> https://…` regex and saved to `~/Music/dj-tools/state/course_url.txt` for `_get_url()`. `npx portless get <name>` is **not** used — in a git worktree it returns a worktree-prefixed URL (`https://minsk-v10.course.localhost:1355`) that portless never actually registers a route for, so it 404s.
+- **Service install is optional** — without `npx portless service install` the proxy runs on port 1355 (no root needed) and URLs include `:1355`. With it, port 443 binds at boot and URLs go port-free (`https://course.localhost`). The CLI prints a hint when the port shows in the URL; nothing breaks if you ignore it.
+- **Broken courses don't black-hole the app** — vite's dev server returns `200 + index.html` (SPA fallback) for missing files in `publicDir`, so a broken symlink (e.g. unmounted external drive at `~/Music/dj-tools/dj-academy → /Volumes/My Passport/…`) makes `JSON.parse(lessons.json)` throw "Unexpected token '<'". `lessonsStore.loadLessons` checks `Content-Type` and treats non-JSON 200s as missing; `main.tsx` boot walks `courses.json` in order and skips courses that fail to load, so one missing drive doesn't crash the viewer.
 
 ### playlist (SQL → destination)
 

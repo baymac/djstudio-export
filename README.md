@@ -124,9 +124,13 @@ dj
 │   ├── enrich-runs [-n N]                             Past enrich run summaries
 │   └── enrich-tracks <type> <id> [--misses]           Per-session enrichment status
 │
-└── playlist                                           Push a SQL-curated subset to a destination
-    ├── beatport --query SQL --name NAME               Beatport playlist
-    └── rekordbox --query SQL --name NAME              Rekordbox playlist
+├── playlist                                           Push a SQL-curated subset to a destination
+│   ├── beatport --query SQL --name NAME               Beatport playlist
+│   └── rekordbox --query SQL --name NAME              Rekordbox playlist
+│
+└── course                                             Offline course viewer (apps/course)
+    ├── start                                          Spawn vite via portless, open https://course.localhost
+    └── stop                                           Kill the background process group
 ```
 
 ---
@@ -727,17 +731,48 @@ failed.json         lessons that errored or timed out during the last run
 Logs are written automatically to `~/Music/dj-tools/logs/download-course/YYYY-MM-DD_HHMMSS.log`.
 The run holds a `caffeinate -i` power assertion so the Mac won't sleep mid-download.
 
-### Viewer
+### Viewer — `dj course start` / `dj course stop`
 
 ```bash
-cd helpers/course_viewer
-npm install          # first time only
-npm run dev          # opens http://localhost:5173 (or next free port)
+dj course start      # first run: npm install runs automatically (~30s)
+                     # opens https://course.localhost:1355 in your default browser
+dj course stop       # kill the background server
 ```
 
-Vite serves everything directly from `~/Music/dj-tools/course/` as static assets — no
-server, no network requests during playback. Video position and lesson completion state
-are saved to `localStorage`.
+The viewer is at `apps/course/` (a Vite + React app). `dj course start` spawns
+`npx portless course npm run dev` in the background, saves the PID at
+`~/Music/dj-tools/state/course.pid`, and opens the URL portless picked. Running
+`start` again while the server is up just reopens the URL.
+
+Vite serves everything from `~/Music/dj-tools/` as static assets (one directory per
+course, e.g. `dj-academy/`, `producer-academy/`). No backend, no network requests
+during playback. Video position and lesson completion state are saved to
+`localStorage`. If one course's directory is missing (e.g. a symlink to an
+unmounted drive) the viewer logs the failure and falls through to the next
+available course rather than crashing.
+
+#### Logs
+
+- Server stdout / vite output: `~/Music/dj-tools/logs/course/YYYYMMDD_HHMMSS.log`
+- Resolved URL (parsed from the portless log): `~/Music/dj-tools/state/course_url.txt`
+- PID: `~/Music/dj-tools/state/course.pid`
+
+#### Optional one-time setup (port-free URL)
+
+By default the URL has a port number (`https://course.localhost:1355`) because
+the portless proxy can't bind port 443 without root. Two commands fix that:
+
+```bash
+npx portless service install     # launchd daemon on port 443 (sudo prompt)
+npx portless trust               # add portless's local CA to the system trust store
+```
+
+After both, the URL drops to `https://course.localhost` and browsers stop
+warning about self-signed certs. Neither is required — the viewer works fine
+with the port in the URL.
+
+`service install` only auto-starts the **proxy** on boot, not the viewer. You
+still need to run `dj course start` once per session to launch vite.
 
 ### Moving course files to an external SSD
 
@@ -813,7 +848,14 @@ rekordbox/                      Rekordbox writes via pyrekordbox
   backup.py                     master.db backup
   constants.py                  Path discovery + Camelot/cue-kind constants
 
+apps/                           Frontend apps exposed via `dj <name>` commands
+  course/                       Offline course viewer (`dj course start/stop`)
+    cli.py                      Python CLI — spawns vite via portless,
+                                tracks PID + URL in ~/Music/dj-tools/state/
+    src/                        React app: sidebar, lesson view, quiz, video
+    vite.config.ts              publicDir = ~/Music/dj-tools/;
+                                reads PORT/HOST env vars portless injects
+
 helpers/                        Standalone maintenance scripts + course tools
   download_course.py            Course downloader (browser scrape + Dyntube/Circle HLS)
-  course_viewer/                Vite + React viewer — serves ~/Music/dj-tools/course/ locally
 ```
