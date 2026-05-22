@@ -1,0 +1,47 @@
+{
+  "manifest_version": 3,
+  "name": "1001TL PiP",
+  "version": "1.0.0",
+  "description": "PiP a DJ mix with 1001tracklists.com tracklist overlay on YouTube",
+
+  "permissions": ["storage", "tabs", "scripting"],
+  "host_permissions": [
+    "https://www.1001tracklists.com/*",
+    "https://1001tracklists.com/*",
+    "https://www.youtube.com/*"
+  ],
+
+  "background": {
+    "service_worker": "background.js"
+  },
+
+  "content_scripts": [
+    {
+      "matches": ["https://www.1001tracklists.com/*", "https://1001tracklists.com/*"],
+      "js": ["pip-core.js", "content.js"],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": ["https://www.youtube.com/watch*"],
+      "js": ["pip-core.js", "yt-content.js"],
+      "run_at": "document_idle"
+    }
+  ],
+
+  "commands": {
+    "open-pip": {
+      "suggested_key": {
+        "mac": "Command+Shift+P",
+        "default": "Ctrl+Shift+P"
+      },
+      "description": "Open PiP + Tracklist"
+    }
+  },
+
+  "icons": {
+    "16": "icons/icon16.png",
+    "32": "icons/icon32.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  }
+}
