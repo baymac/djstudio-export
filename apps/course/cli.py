@@ -1,6 +1,7 @@
 """dj course — start/stop the offline course viewer via portless."""
 from __future__ import annotations
 
+import datetime
 import os
 import signal
 import subprocess
@@ -9,12 +10,13 @@ from pathlib import Path
 
 from rich.console import Console
 
-from paths import COURSE_PID_FILE
+from paths import COURSE_PID_FILE, LOGS_DIR
 
 console = Console()
 
 _APP_DIR = Path(__file__).parent
 _PID_FILE = COURSE_PID_FILE
+_URL_FILE = COURSE_PID_FILE.parent / "course_url.txt"
 _FALLBACK_URL = "https://course.localhost"
 
 
@@ -50,16 +52,9 @@ def _is_alive(pid: int) -> bool:
 
 
 def _get_url() -> str:
-    """Ask portless for the current URL of the 'course' app."""
+    """Read the portless URL we saved on start, or fall back to the default."""
     try:
-        result = subprocess.run(
-            ["npx", "portless", "get", "course"],
-            cwd=_APP_DIR,
-            capture_output=True,
-            text=True,
-            timeout=5,
-        )
-        url = result.stdout.strip()
+        url = _URL_FILE.read_text().strip()
         if url.startswith("http"):
             return url
     except Exception:
@@ -79,21 +74,41 @@ def run_start() -> None:
     _ensure_deps()
     _ensure_proxy()
 
-    # portless wraps vite, detects its port, and proxies https://course.localhost to it.
+    # portless detects vite's port by reading its stdout ("Local: http://localhost:PORT").
+    # We redirect to a log file rather than DEVNULL so portless can see that line.
+    log_dir = LOGS_DIR / "course"
+    log_dir.mkdir(parents=True, exist_ok=True)
+    log_path = log_dir / f"{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}.log"
+    log_fh = log_path.open("w")
+
     proc = subprocess.Popen(
         ["npx", "portless", "course", "npm", "run", "dev"],
         cwd=_APP_DIR,
         start_new_session=True,  # new session → pid == pgid, kill group on stop
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
+        stdout=log_fh,
+        stderr=log_fh,
     )
     _PID_FILE.write_text(str(proc.pid))
 
+    # Wait for portless to log the proxy URL line, then save it.
     time.sleep(3)
+    _save_url_from_log(log_path)
     url = _get_url()
     console.print(f"[green]Course viewer started[/green] → {url}")
     _hint_service_install(url)
     _open(url)
+
+
+def _save_url_from_log(log_path: Path) -> None:
+    """Parse the portless log for '-> https://...' and write it to _URL_FILE."""
+    import re
+    try:
+        text = log_path.read_text()
+        m = re.search(r"->\s+(https://\S+)", text)
+        if m:
+            _URL_FILE.write_text(m.group(1).strip())
+    except Exception:
+        pass
 
 
 def run_stop() -> None:
@@ -110,6 +125,7 @@ def run_stop() -> None:
     except ProcessLookupError:
         pass
     _PID_FILE.unlink(missing_ok=True)
+    _URL_FILE.unlink(missing_ok=True)
     console.print("[green]Course viewer stopped.[/green]")
 
 

@@ -12,5 +12,8 @@ export default defineConfig({
   publicDir: djToolsDir,
   server: {
     open: false,
+    // portless sets PORT + HOST env vars to bind vite to its chosen port
+    port: process.env.PORT ? parseInt(process.env.PORT) : 5173,
+    host: process.env.HOST ?? 'localhost',
   },
 })
