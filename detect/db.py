@@ -231,6 +231,74 @@ def migrate() -> None:
         for _col, _typ in _BEATPORT_EXTRAS_COLS:
             _add_column_if_missing(con, "enriched_tracks", _col, _typ)
 
+        # Additive migration: duplicate count on enrich_runs.
+        _add_column_if_missing(con, "enrich_runs", "duplicate", "INTEGER DEFAULT 0")
+
+        # Additive migration: flip the FK direction so many detected_tracks can
+        # share one enriched_tracks row without copying data.
+        _add_column_if_missing(con, "detected_tracks", "enriched_track_id", "INTEGER REFERENCES enriched_tracks(id)")
+        # UNIQUE index on beatport_id — enforces one enriched row per Beatport track.
+        # (Safe only after dedupe_enriched_tracks has been run; try/except guards.)
+        try:
+            con.execute(
+                "CREATE UNIQUE INDEX IF NOT EXISTS idx_enriched_beatport_unique "
+                "ON enriched_tracks(beatport_id)"
+            )
+        except sqlite3.OperationalError:
+            pass
+        # Populate enriched_track_id for existing rows from the old detected_track_id column.
+        con.execute("""
+            UPDATE detected_tracks
+            SET enriched_track_id = (
+                SELECT et.id FROM enriched_tracks et
+                WHERE et.detected_track_id = detected_tracks.id
+            )
+            WHERE enriched_track_id IS NULL
+        """)
+
+        # Static Beatport key-name → Camelot lookup table.
+        con.execute("""
+            CREATE TABLE IF NOT EXISTS key_map (
+                beatport_key TEXT PRIMARY KEY,
+                camelot      TEXT NOT NULL
+            )
+        """)
+        con.executemany(
+            "INSERT OR IGNORE INTO key_map (beatport_key, camelot) VALUES (?, ?)",
+            _KEY_MAP_ROWS,
+        )
+
+
+# Full Beatport text key → Camelot wheel.  Covers all enharmonic spellings.
+_KEY_MAP_ROWS = [
+    # ── Major (B suffix) ──────────────────────────────────────────────────────
+    ("B Major",   "1B"),
+    ("F# Major",  "2B"), ("Gb Major",  "2B"),
+    ("Db Major",  "3B"), ("C# Major",  "3B"),
+    ("Ab Major",  "4B"), ("G# Major",  "4B"),
+    ("Eb Major",  "5B"), ("D# Major",  "5B"),
+    ("Bb Major",  "6B"), ("A# Major",  "6B"),
+    ("F Major",   "7B"),
+    ("C Major",   "8B"),
+    ("G Major",   "9B"),
+    ("D Major",   "10B"),
+    ("A Major",   "11B"),
+    ("E Major",   "12B"),
+    # ── Minor (A suffix) ──────────────────────────────────────────────────────
+    ("Ab Minor",  "1A"), ("G# Minor",  "1A"),
+    ("Eb Minor",  "2A"), ("D# Minor",  "2A"),
+    ("Bb Minor",  "3A"), ("A# Minor",  "3A"),
+    ("F Minor",   "4A"),
+    ("C Minor",   "5A"),
+    ("G Minor",   "6A"),
+    ("D Minor",   "7A"),
+    ("A Minor",   "8A"),
+    ("E Minor",   "9A"),
+    ("B Minor",   "10A"),
+    ("F# Minor",  "11A"), ("Gb Minor", "11A"),
+    ("Db Minor",  "12A"), ("C# Minor", "12A"),
+]
+
 
 def _add_column_if_missing(con: sqlite3.Connection, table: str, col: str, typ: str) -> None:
     """ALTER TABLE ADD COLUMN if not already present. Idempotent."""
@@ -453,8 +521,7 @@ def delete_session(session_id: int) -> int:
             DELETE FROM detected_tracks
             WHERE id IN (SELECT track_id FROM track_sessions WHERE session_id = ?)
               AND id NOT IN (SELECT track_id FROM track_sessions WHERE session_id != ?)
-              AND id NOT IN (SELECT detected_track_id FROM enriched_tracks
-                             WHERE detected_track_id IS NOT NULL)
+              AND enriched_track_id IS NULL
               AND source != 'beatport'
         """, (session_id, session_id))
         con.execute("DELETE FROM track_sessions WHERE session_id = ?", (session_id,))
@@ -485,13 +552,9 @@ def remove_tracks_from_session(session_id: int, track_ids: list[int]) -> list[in
                       SELECT track_id FROM track_sessions
                       WHERE session_id != ? AND track_id IN ({placeholders})
                   )
-                  AND id NOT IN (
-                      SELECT detected_track_id FROM enriched_tracks
-                      WHERE detected_track_id IS NOT NULL
-                        AND detected_track_id IN ({placeholders})
-                  )
+                  AND enriched_track_id IS NULL
                   AND source != 'beatport'""",
-            (*track_ids, session_id, *track_ids, *track_ids),
+            (*track_ids, session_id, *track_ids),
         ).fetchall()
         deletable = {r["id"] for r in rows}
         for tid in track_ids:
@@ -628,7 +691,7 @@ def tracks_for_session_enriched(session_id: int) -> list[sqlite3.Row]:
                       a.melody   AS melody
                FROM detected_tracks d
                JOIN track_sessions ts ON ts.track_id = d.id
-               LEFT JOIN enriched_tracks ed ON ed.detected_track_id = d.id
+               LEFT JOIN enriched_tracks ed ON ed.id = d.enriched_track_id
                LEFT JOIN enriched_tracks ei ON ei.id = (
                    SELECT e2.id FROM enriched_tracks e2
                    WHERE LOWER(e2.artist) = LOWER(d.artist)
@@ -649,12 +712,11 @@ def tracks_for_session_enriched(session_id: int) -> list[sqlite3.Row]:
 def get_unenriched_tracks() -> list[sqlite3.Row]:
     with _connect() as con:
         return con.execute(
-            """SELECT d.* FROM detected_tracks d
-               LEFT JOIN enriched_tracks e ON e.detected_track_id = d.id
-               WHERE e.id IS NULL
-                 AND d.enrich_outcome IS NULL
-                 AND d.artist IS NOT NULL AND d.title IS NOT NULL
-               ORDER BY d.id""",
+            """SELECT * FROM detected_tracks
+               WHERE enriched_track_id IS NULL
+                 AND enrich_outcome IS NULL
+                 AND artist IS NOT NULL AND title IS NOT NULL
+               ORDER BY id""",
         ).fetchall()
 
 
@@ -699,61 +761,21 @@ def list_enriched_tracks(limit: int = 50, playlist_name: str | None = None) -> l
 
 
 def upsert_enriched(detected_track_id: int, meta: dict, extras: dict | None = None) -> None:
-    """Insert or update one row in `enriched_tracks`.
+    """Insert or update one row in `enriched_tracks`, then link detected_tracks.enriched_track_id.
 
     `meta` carries the search-result fields (bpm/key/genre/release_date/beatport_link).
     `extras` (optional) carries the full-track-detail fields fetched from
     `/v4/catalog/tracks/{id}/`: mix_name, label, catalog_number, isrc, sub_genre,
     length_ms. NULL extras leave existing values intact (COALESCE).
+
+    Multiple detected_tracks rows may point to the same enriched_tracks row (e.g.
+    a remix and the base version that both resolved to the same beatport_id). The
+    enriched row is keyed on beatport_id; detected_tracks.enriched_track_id is the
+    link. No data is copied — all variants share one canonical row.
     """
     extras = extras or {}
     with _connect() as con:
         beatport_id = meta.get("beatport_id")
-        if beatport_id:
-            existing = con.execute(
-                # IS NOT handles NULL correctly: NULL IS NOT <int> is TRUE
-                "SELECT id, detected_track_id FROM enriched_tracks WHERE beatport_id = ? AND detected_track_id IS NOT ?",
-                (beatport_id, detected_track_id),
-            ).fetchone()
-            if existing:
-                if existing["detected_track_id"] is None:
-                    # Row was inserted by sync-beatport (no detection link yet).
-                    # Claim it: link this detected track and backfill any extras.
-                    dt_row = con.execute(
-                        "SELECT apple_music_url FROM detected_tracks WHERE id = ?",
-                        (detected_track_id,),
-                    ).fetchone()
-                    apple_url_claim = dt_row["apple_music_url"] if dt_row else None
-                    con.execute(
-                        """UPDATE enriched_tracks SET
-                             detected_track_id = ?,
-                             apple_music_url   = COALESCE(apple_music_url, ?),
-                             mix_name          = COALESCE(mix_name, ?),
-                             label             = COALESCE(label, ?),
-                             catalog_number    = COALESCE(catalog_number, ?),
-                             isrc              = COALESCE(isrc, ?),
-                             sub_genre         = COALESCE(sub_genre, ?),
-                             length_ms         = COALESCE(length_ms, ?)
-                           WHERE id = ?""",
-                        (
-                            detected_track_id,
-                            apple_url_claim,
-                            extras.get("mix_name"),
-                            extras.get("label"),
-                            extras.get("catalog_number"),
-                            extras.get("isrc"),
-                            extras.get("sub_genre"),
-                            extras.get("length_ms"),
-                            existing["id"],
-                        ),
-                    )
-                else:
-                    # A different detected track already claimed this beatport_id.
-                    con.execute(
-                        "UPDATE detected_tracks SET enrich_outcome = 'duplicate' WHERE id = ?",
-                        (detected_track_id,),
-                    )
-                return
 
         row = con.execute(
             "SELECT artist, title, apple_music_url FROM detected_tracks WHERE id = ?",
@@ -765,12 +787,11 @@ def upsert_enriched(detected_track_id: int, meta: dict, extras: dict | None = No
 
         con.execute(
             """INSERT INTO enriched_tracks
-               (detected_track_id, beatport_id, beatport_link, bpm, key, genre,
+               (beatport_id, beatport_link, bpm, key, genre,
                 release_date, apple_music_url, artist, title, enriched_at,
                 mix_name, label, catalog_number, isrc, sub_genre, length_ms)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-               ON CONFLICT(detected_track_id) DO UPDATE SET
-                 beatport_id     = excluded.beatport_id,
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+               ON CONFLICT(beatport_id) DO UPDATE SET
                  beatport_link   = excluded.beatport_link,
                  bpm             = excluded.bpm,
                  key             = excluded.key,
@@ -787,7 +808,6 @@ def upsert_enriched(detected_track_id: int, meta: dict, extras: dict | None = No
                  sub_genre       = COALESCE(excluded.sub_genre,      enriched_tracks.sub_genre),
                  length_ms       = COALESCE(excluded.length_ms,      enriched_tracks.length_ms)""",
             (
-                detected_track_id,
                 meta.get("beatport_id"),
                 meta.get("beatport_link"),
                 meta.get("bpm"),
@@ -806,11 +826,38 @@ def upsert_enriched(detected_track_id: int, meta: dict, extras: dict | None = No
                 extras.get("length_ms"),
             ),
         )
+        # Link this detected track to the enriched row (or the pre-existing one
+        # for the same beatport_id that came in via sync-beatport).
+        con.execute("""
+            UPDATE detected_tracks
+            SET enriched_track_id = (SELECT id FROM enriched_tracks WHERE beatport_id = ?)
+            WHERE id = ?
+        """, (beatport_id, detected_track_id))
+
+
+def link_detected_to_enriched(detected_track_id: int, beatport_id: int) -> bool:
+    """Point detected_tracks.enriched_track_id at an existing enriched row.
+
+    Used when a remix/variant is deduplicated against an already-enriched base
+    title — no data copy needed, just a FK link so JOINs on enriched_track_id work.
+    Returns True if the enriched row was found and linked, False otherwise.
+    """
+    with _connect() as con:
+        row = con.execute(
+            "SELECT id FROM enriched_tracks WHERE beatport_id = ?", (beatport_id,)
+        ).fetchone()
+        if not row:
+            return False
+        con.execute(
+            "UPDATE detected_tracks SET enriched_track_id = ? WHERE id = ?",
+            (row["id"], detected_track_id),
+        )
+        return True
 
 
 def get_enriched_artist_titles() -> list[sqlite3.Row]:
     with _connect() as con:
-        return con.execute("SELECT artist, title FROM enriched_tracks").fetchall()
+        return con.execute("SELECT artist, title, beatport_id FROM enriched_tracks").fetchall()
 
 
 def mark_enrich_miss(detected_track_id: int, outcome: str) -> None:
@@ -830,14 +877,14 @@ def start_enrich_run() -> int:
 
 
 def finish_enrich_run(
-    run_id: int, seen: int, found: int, not_found: int, fuzzy_miss: int
+    run_id: int, seen: int, found: int, not_found: int, fuzzy_miss: int, duplicate: int = 0
 ) -> None:
     with _connect() as con:
         con.execute(
             """UPDATE enrich_runs
-               SET finished_at=?, seen=?, found=?, not_found=?, fuzzy_miss=?, status='done'
+               SET finished_at=?, seen=?, found=?, not_found=?, fuzzy_miss=?, duplicate=?, status='done'
                WHERE id=?""",
-            (_now(), seen, found, not_found, fuzzy_miss, run_id),
+            (_now(), seen, found, not_found, fuzzy_miss, duplicate, run_id),
         )
 
 

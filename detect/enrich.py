@@ -198,8 +198,9 @@ def run_enrich(
 
     # Seed seen base-titles from already-enriched tracks so that version variants
     # detected in a previous run are also caught.
-    seen_base_titles: set[tuple[str, str]] = {
-        _base_key(r["artist"], r["title"])
+    # Maps base_key → beatport_id so duplicates can copy the enriched row.
+    seen_base_titles: dict[tuple[str, str], int | None] = {
+        _base_key(r["artist"], r["title"]): r["beatport_id"]
         for r in get_enriched_artist_titles()
         if r["artist"] and r["title"]
     }
@@ -219,8 +220,18 @@ def run_enrich(
 
             bk = _base_key(artist, title)
             if bk in seen_base_titles:
+                existing_bp_id = seen_base_titles[bk]
+                if not dry_run and existing_bp_id is not None:
+                    linked = detect_db.link_detected_to_enriched(track_id, existing_bp_id)
+                    if linked:
+                        counts["duplicate"] += 1
+                        _log(
+                            f"duplicate  {artist} — {title}  (linked to bp:{existing_bp_id})",
+                            f"[dim]duplicate (linked):[/dim] {artist} — {title}",
+                        )
+                        continue
                 _log(
-                    f"duplicate  {artist} — {title}  (base title already enriched)",
+                    f"duplicate  {artist} — {title}  (base title already enriched, no bp_id to link)",
                     f"[dim]duplicate:[/dim] {artist} — {title}",
                 )
                 if not dry_run:
@@ -229,7 +240,7 @@ def run_enrich(
                 continue
             # Reserve this base title for the current run before the API call
             # so parallel-ish processing within the same batch also deduplicates.
-            seen_base_titles.add(bk)
+            seen_base_titles[bk] = None  # placeholder until beatport_id is known
 
             artist_query = re.sub(r"\s*[\(\[].*?[\)\]]", "", artist).strip()
             query = f"{artist_query} {search_query(title)}"
@@ -351,6 +362,7 @@ def run_enrich(
                 pass  # Non-critical — basic enrich still succeeds with empty extras.
 
             detect_db.upsert_enriched(track_id, meta, extras=extras)
+            seen_base_titles[bk] = meta["beatport_id"]
 
             counts["found"] += 1
             _log(
@@ -367,6 +379,7 @@ def run_enrich(
             found=counts["found"],
             not_found=counts["not_found"],
             fuzzy_miss=counts["fuzzy_miss"],
+            duplicate=counts["duplicate"],
         )
 
     summary = [
