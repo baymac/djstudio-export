@@ -151,7 +151,7 @@ def _run_studio_analyse_impl(
             "Nothing to analyse — every enriched track already has a row in "
             "enriched_tracks_analysis (or is below the duration / failure-attempt thresholds).\n"
             "[dim]Use --force to re-process all tracks; "
-            "delete ~/Music/dj-tools/state/studio_analyse_failures.json to retry hard-failed tracks.[/dim]"
+            "delete ~/Music/dj/state/studio_analyse_failures.json to retry hard-failed tracks.[/dim]"
         )
         return
     console.print(

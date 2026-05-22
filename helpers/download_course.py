@@ -20,7 +20,7 @@ Stages:
         - Click "Complete lesson" if needed (unlocks next)
         - Persist manifest after each lesson
 
-Output: ~/Music/dj-tools/course/{lessons.json, videos/, files/, images/, quizzes/}
+Output: ~/Music/dj/course/{lessons.json, videos/, files/, images/, quizzes/}
 """
 from __future__ import annotations
 
@@ -1275,17 +1275,17 @@ def _write_manifest(lessons: list[Lesson]) -> None:
 
 
 def _update_courses_index(course_dir: Path, course_name: str, lesson_count: int) -> None:
-    """Keep ~/Music/dj-tools/courses.json in sync with downloaded courses.
+    """Keep ~/Music/dj/courses.json in sync with downloaded courses.
 
-    Only runs when course_dir is a direct child of DJ_TOOLS_DIR so the viewer
-    can serve it via publicDir = DJ_TOOLS_DIR.
+    Only runs when course_dir is a direct child of DJ_DIR so the viewer
+    can serve it via publicDir = DJ_DIR.
     """
-    from paths import DJ_TOOLS_DIR  # noqa: PLC0415
+    from paths import DJ_DIR  # noqa: PLC0415
     try:
-        if course_dir.parent.resolve() != Path(DJ_TOOLS_DIR).resolve():
+        if course_dir.parent.resolve() != Path(DJ_DIR).resolve():
             return
         course_id = course_dir.name
-        index_path = Path(DJ_TOOLS_DIR) / "courses.json"
+        index_path = Path(DJ_DIR) / "courses.json"
         entries: list[dict] = []
         if index_path.exists():
             try:

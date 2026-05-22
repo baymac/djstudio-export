@@ -1,6 +1,6 @@
 """Single source of truth for every file the dj tool reads or writes.
 
-Layout under `~/Music/dj-tools/`:
+Layout under `~/Music/dj/`:
 
     dj.db                              SQLite — all tables
     logs/<command>/YYYY-MM-DD_<id>.log per-command log files
@@ -12,6 +12,10 @@ Layout under `~/Music/dj-tools/`:
 
 Each writer is responsible for its own `mkdir(parents=True, exist_ok=True)` —
 this module just exposes path constants and small log helpers.
+
+On import, if the legacy `~/Music/dj-tools/` directory exists and the new
+`~/Music/dj/` does not, the legacy directory is renamed in place. Same
+filesystem, atomic, no data duplication.
 """
 from __future__ import annotations
 
@@ -20,14 +24,24 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import IO, Iterator, Tuple
 
-DJ_TOOLS_DIR = Path.home() / "Music" / "dj-tools"
+DJ_DIR = Path.home() / "Music" / "dj"
+_LEGACY_DIR = Path.home() / "Music" / "dj-tools"
 
-DB_PATH = DJ_TOOLS_DIR / "dj.db"
-LOGS_DIR = DJ_TOOLS_DIR / "logs"
-STATE_DIR = DJ_TOOLS_DIR / "state"
-CACHE_DIR = DJ_TOOLS_DIR / "cache"
-EXPORTS_DIR = DJ_TOOLS_DIR / "exports"
-BACKUPS_DIR = DJ_TOOLS_DIR / "backups"
+
+def _migrate_legacy_location() -> None:
+    if _LEGACY_DIR.exists() and not DJ_DIR.exists():
+        DJ_DIR.parent.mkdir(parents=True, exist_ok=True)
+        _LEGACY_DIR.rename(DJ_DIR)
+
+
+_migrate_legacy_location()
+
+DB_PATH = DJ_DIR / "dj.db"
+LOGS_DIR = DJ_DIR / "logs"
+STATE_DIR = DJ_DIR / "state"
+CACHE_DIR = DJ_DIR / "cache"
+EXPORTS_DIR = DJ_DIR / "exports"
+BACKUPS_DIR = DJ_DIR / "backups"
 
 # State files
 IG_SESSION_FILE = STATE_DIR / "ig_session.json"
@@ -37,7 +51,8 @@ BROWSER_PROFILE_DIR = STATE_DIR / "browser-profile"
 # Cache
 MUSICKIT_CACHE_DIR = CACHE_DIR / "musickit"
 
-COURSE_DIR = DJ_TOOLS_DIR / "course"
+COURSE_DIR = DJ_DIR / "course"
+COURSE_PID_FILE = STATE_DIR / "course.pid"
 
 # Exports & backups
 APPLE_MUSIC_EXPORT_CSV = EXPORTS_DIR / "apple_music_export.csv"

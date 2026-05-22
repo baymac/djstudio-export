@@ -3,10 +3,10 @@
 Two auth modes coexist:
 
 - **client_credentials** (default) — server-to-server, no user context. Works
-  for public sets / tracks. Cached at `~/Music/dj-tools/state/soundcloud_token.json`.
+  for public sets / tracks. Cached at `~/Music/dj/state/soundcloud_token.json`.
 - **authorization_code** (after `dj detect login-soundcloud`) — user-bound,
   required for personalized `/discover/sets/...` URLs and any user-private
-  content. Cached at `~/Music/dj-tools/state/soundcloud_user_token.json` with a
+  content. Cached at `~/Music/dj/state/soundcloud_user_token.json` with a
   long-lived refresh token; auto-refreshed before expiry and on 401.
 
 `_get_token()` prefers the user token when available and falls back to

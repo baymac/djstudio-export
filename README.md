@@ -2,10 +2,10 @@
 
 Unified DJ toolkit. Builds a fully-analysed track library: pull tracks in from Apple Music, Beatport, and detected audio sources, progressively enrich each track with Beatport metadata, DJ Studio analysis (key/energy/cues/stems), and rekordbox phrase tags. Then push any SQL-curated subset to a Beatport playlist, a rekordbox playlist, or a DJ Studio mix.
 
-All tool-generated files live under `~/Music/dj-tools/`:
+All tool-generated files live under `~/Music/dj/`:
 
 ```
-~/Music/dj-tools/
+~/Music/dj/
 ├── dj.db                              SQLite — all tables
 ├── logs/<command>/YYYY-MM-DD_<id>.log per-command log files (one per run)
 ├── state/                             session files, config, Beatport browser profile
@@ -124,9 +124,13 @@ dj
 │   ├── enrich-runs [-n N]                             Past enrich run summaries
 │   └── enrich-tracks <type> <id> [--misses]           Per-session enrichment status
 │
-└── playlist                                           Push a SQL-curated subset to a destination
-    ├── beatport --query SQL --name NAME               Beatport playlist
-    └── rekordbox --query SQL --name NAME              Rekordbox playlist
+├── playlist                                           Push a SQL-curated subset to a destination
+│   ├── beatport --query SQL --name NAME               Beatport playlist
+│   └── rekordbox --query SQL --name NAME              Rekordbox playlist
+│
+└── course                                             Offline course viewer (apps/course)
+    ├── start                                          Spawn vite via portless, open https://course.localhost
+    └── stop                                           Kill the background process group
 ```
 
 ---
@@ -151,7 +155,7 @@ uv run dj_cli.py login-beatport --cookie # refresh via BEATPORT_SESSION_TOKEN on
 
 Pushes Apple Music tracks (library, favourites, or any named playlist) into matching Beatport genre playlists you own. Each Apple Music track is fuzzy-matched against Beatport search results, classified by genre, and added to the right destination playlist. Per-track outcomes (`added`, `duplicate`, `fuzzy_miss`, `no_classify`) are written to `synced_tracks` so a track is never reprocessed. Interrupted runs resume cleanly.
 
-Log written to `~/Music/dj-tools/logs/sync-music-beatport/YYYY-MM-DD_<run_id>.log`.
+Log written to `~/Music/dj/logs/sync-music-beatport/YYYY-MM-DD_<run_id>.log`.
 
 ```bash
 uv run dj_cli.py sync music-beatport check-connections   # verify Apple Music + Beatport auth
@@ -329,7 +333,7 @@ uv run dj_cli.py detect enrich --threshold 0.8       # stricter match (default: 
 uv run dj_cli.py detect enrich --retry-misses        # retry previously missed tracks
 ```
 
-Log written to `~/Music/dj-tools/logs/enrich/YYYY-MM-DD_<run_id>.log`. Every other stage writes to `~/Music/dj-tools/logs/<stage>/YYYY-MM-DD_<HHMMSS>.log` automatically.
+Log written to `~/Music/dj/logs/enrich/YYYY-MM-DD_<run_id>.log`. Every other stage writes to `~/Music/dj/logs/<stage>/YYYY-MM-DD_<HHMMSS>.log` automatically.
 
 ---
 
@@ -396,7 +400,7 @@ uv run dj_cli.py detect studio-analyse --ids 23330162,21531599 --force --verbose
 
 **JWT auto-refresh mid-run:** DJ Studio's access JWT lasts ~60 min. On the first 401 from `cf.dj.studio` the run re-decrypts `encryptedToken-v2.dat`, re-exchanges via `app-services.dj.studio`, pushes the fresh token down to the running Node helper (`setAccessJwt` command — no helper restart, no model reload), and retries the failed track. Long batches don't need babysitting. If the post-refresh retry also 401s, the run aborts with a clear message — that means `encryptedToken-v2.dat` itself is invalid (open DJ Studio, sign in, quit, re-run).
 
-**Failure handling:** transient `cf.dj.studio` failures are auto-retried inside the Node helper (4 attempts, exponential backoff up to 9s). Tracks that still fail get a second pass at the end of the batch after a 5s pause. Tracks that fail on both first pass and retry are recorded in a sidecar (`~/Music/dj-tools/state/studio_analyse_failures.json`) and auto-skipped on subsequent runs once they hit `MAX_FAILURE_ATTEMPTS` (3) — bypass with `--retry-failed`. The summary distinguishes "written / recovered on retry / permanently failed" with per-track error reasons.
+**Failure handling:** transient `cf.dj.studio` failures are auto-retried inside the Node helper (4 attempts, exponential backoff up to 9s). Tracks that still fail get a second pass at the end of the batch after a 5s pause. Tracks that fail on both first pass and retry are recorded in a sidecar (`~/Music/dj/state/studio_analyse_failures.json`) and auto-skipped on subsequent runs once they hit `MAX_FAILURE_ATTEMPTS` (3) — bypass with `--retry-failed`. The summary distinguishes "written / recovered on retry / permanently failed" with per-track error reasons.
 
 **Per-track timing:** ~30-50s per track on first run (SDK + model cold-start), ~25-30s steady-state. ~2GB peak memory (Demucs models). 100 tracks ≈ 50-60 minutes.
 
@@ -589,7 +593,7 @@ Or run `dj login-beatport --ui` and it does this automatically.
 
 ## Database schema
 
-All tables live in `~/Music/dj-tools/dj.db`.
+All tables live in `~/Music/dj/dj.db`.
 
 | Table | Written by | Contents |
 |---|---|---|
@@ -641,7 +645,7 @@ uv run helpers/delete_beatport_track.py \
 ## Course viewer
 
 Download and watch the Pete Tong DJ Academy / Circle course offline.
-All course data lives under `~/Music/dj-tools/course/` (or an SSD — see below).
+All course data lives under `~/Music/dj/course/` (or an SSD — see below).
 
 ### Downloader
 
@@ -652,7 +656,7 @@ uv run helpers/download_course.py login <course_url>
 ```
 
 Opens a headed (visible) browser window. Sign in manually. The session is saved
-to a persistent browser profile at `~/Music/dj-tools/state/course-browser-profile/`
+to a persistent browser profile at `~/Music/dj/state/course-browser-profile/`
 and reused by every subsequent `download` run — you only need to `login` once (or
 after your session expires).
 
@@ -671,7 +675,7 @@ lesson so progress survives interruption.
 
 | Flag | Default | Description |
 |------|---------|-------------|
-| `--out-dir PATH` | `~/Music/dj-tools/course/` | Write all output (videos, manifest, quizzes, etc.) to a custom directory instead of the default. Use this to download a second course without clobbering the first. |
+| `--out-dir PATH` | `~/Music/dj/course/` | Write all output (videos, manifest, quizzes, etc.) to a custom directory instead of the default. Use this to download a second course without clobbering the first. |
 | `--limit N` | all | Stop after processing N lessons. The full manifest is still written for all discovered lessons; only the first N are actively scraped. Useful for smoke-testing after a code change. |
 | `--dry-run` | off | Discover and print all lessons (title, ID, type, status) without downloading anything. No browser navigation, no file writes. |
 | `--lesson-ids ID1,ID2,...` | all | Re-scrape only the listed lesson IDs, bypassing the normal "already complete" skip. Implies `force=True` for those lessons — quizzes are re-brute-forced from scratch even if `quizzes/<id>.json` already exists. Use after fixing a scraper bug, recovering a failed video, or re-running timed-out quizzes. |
@@ -709,7 +713,7 @@ uv run helpers/download_course.py download <course_url> --lesson-ids 2623038,943
 uv run helpers/download_course.py download <course_url> --limit 5 --dry-run
 ```
 
-**Output layout** under `~/Music/dj-tools/course/`:
+**Output layout** under `~/Music/dj/course/`:
 
 ```
 lessons.json        full manifest — one entry per lesson
@@ -724,20 +728,51 @@ _hls/               rewritten m3u8 manifests (local key URIs)
 failed.json         lessons that errored or timed out during the last run
 ```
 
-Logs are written automatically to `~/Music/dj-tools/logs/download-course/YYYY-MM-DD_HHMMSS.log`.
+Logs are written automatically to `~/Music/dj/logs/download-course/YYYY-MM-DD_HHMMSS.log`.
 The run holds a `caffeinate -i` power assertion so the Mac won't sleep mid-download.
 
-### Viewer
+### Viewer — `dj course start` / `dj course stop`
 
 ```bash
-cd helpers/course_viewer
-npm install          # first time only
-npm run dev          # opens http://localhost:5173 (or next free port)
+dj course start      # first run: npm install runs automatically (~30s)
+                     # opens https://course.localhost:1355 in your default browser
+dj course stop       # kill the background server
 ```
 
-Vite serves everything directly from `~/Music/dj-tools/course/` as static assets — no
-server, no network requests during playback. Video position and lesson completion state
-are saved to `localStorage`.
+The viewer is at `apps/course/` (a Vite + React app). `dj course start` spawns
+`npx portless course npm run dev` in the background, saves the PID at
+`~/Music/dj/state/course.pid`, and opens the URL portless picked. Running
+`start` again while the server is up just reopens the URL.
+
+Vite serves everything from `~/Music/dj/` as static assets (one directory per
+course, e.g. `dj-academy/`, `producer-academy/`). No backend, no network requests
+during playback. Video position and lesson completion state are saved to
+`localStorage`. If one course's directory is missing (e.g. a symlink to an
+unmounted drive) the viewer logs the failure and falls through to the next
+available course rather than crashing.
+
+#### Logs
+
+- Server stdout / vite output: `~/Music/dj/logs/course/YYYYMMDD_HHMMSS.log`
+- Resolved URL (parsed from the portless log): `~/Music/dj/state/course_url.txt`
+- PID: `~/Music/dj/state/course.pid`
+
+#### Optional one-time setup (port-free URL)
+
+By default the URL has a port number (`https://course.localhost:1355`) because
+the portless proxy can't bind port 443 without root. Two commands fix that:
+
+```bash
+npx portless service install     # launchd daemon on port 443 (sudo prompt)
+npx portless trust               # add portless's local CA to the system trust store
+```
+
+After both, the URL drops to `https://course.localhost` and browsers stop
+warning about self-signed certs. Neither is required — the viewer works fine
+with the port in the URL.
+
+`service install` only auto-starts the **proxy** on boot, not the viewer. You
+still need to run `dj course start` once per session to launch vite.
 
 ### Moving course files to an external SSD
 
@@ -745,10 +780,10 @@ The course directory is ~30 GB. To move it off the boot drive:
 
 ```bash
 # 1. Move the files to the SSD (substitute your actual mount point)
-mv ~/Music/dj-tools/course /Volumes/YourSSD/dj-course
+mv ~/Music/dj/course /Volumes/YourSSD/dj-course
 
 # 2. Symlink the original path to the new location
-ln -s /Volumes/YourSSD/dj-course ~/Music/dj-tools/course
+ln -s /Volumes/YourSSD/dj-course ~/Music/dj/course
 ```
 
 The symlink is transparent to Vite, the downloader, and `paths.py` — nothing else needs
@@ -813,7 +848,14 @@ rekordbox/                      Rekordbox writes via pyrekordbox
   backup.py                     master.db backup
   constants.py                  Path discovery + Camelot/cue-kind constants
 
+apps/                           Frontend apps exposed via `dj <name>` commands
+  course/                       Offline course viewer (`dj course start/stop`)
+    cli.py                      Python CLI — spawns vite via portless,
+                                tracks PID + URL in ~/Music/dj/state/
+    src/                        React app: sidebar, lesson view, quiz, video
+    vite.config.ts              publicDir = ~/Music/dj/;
+                                reads PORT/HOST env vars portless injects
+
 helpers/                        Standalone maintenance scripts + course tools
   download_course.py            Course downloader (browser scrape + Dyntube/Circle HLS)
-  course_viewer/                Vite + React viewer — serves ~/Music/dj-tools/course/ locally
 ```

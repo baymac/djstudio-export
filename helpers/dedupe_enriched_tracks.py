@@ -37,14 +37,14 @@ import shutil
 import sqlite3
 import sys
 from datetime import datetime
-from pathlib import Path
 
 from rich.console import Console
 
+from paths import BACKUPS_DIR, DB_PATH
+
 console = Console()
 
-DB_PATH = Path.home() / "Music" / "dj-tools" / "dj.db"
-BACKUP_DIR = Path.home() / "Music" / "dj-tools" / "backups" / "dj-tools"
+BACKUP_DIR = BACKUPS_DIR / "dj"
 
 
 def populated_score(row: sqlite3.Row, cols: list[str]) -> int:

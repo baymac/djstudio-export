@@ -8,8 +8,9 @@ import sys
 import time
 from pathlib import Path
 
+from paths import STATE_DIR as _STATE_DIR
+
 _YTDLP = [sys.executable, "-m", "yt_dlp"]
-_STATE_DIR = Path.home() / "Music/dj-tools/state"
 _WORKING_BROWSER_FILE = _STATE_DIR / "yt_browser.txt"
 _BROWSER_TTL = 7 * 24 * 3600
 _BROWSERS = ["brave", "chrome", "safari", "firefox"]

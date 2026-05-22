@@ -106,7 +106,12 @@ export function Sidebar({ sections }: Props) {
     if (courseId === coursePrefix) return
     const course = availableCourses.find(c => c.id === courseId)
     if (!course) return
-    await loadLessons(course.id, course.name)
+    try {
+      await loadLessons(course.id, course.name)
+    } catch (err: any) {
+      alert(err?.message ?? `Failed to load ${course.name}`)
+      return
+    }
     localStorage.setItem('selectedCourse', course.id)
     navigate({
       to: '/$courseId/lesson/$lessonId',

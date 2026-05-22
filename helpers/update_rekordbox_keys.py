@@ -23,6 +23,8 @@ import sqlite3
 import sys
 from pathlib import Path
 
+from paths import DB_PATH
+
 from rich.console import Console
 
 from rekordbox.backup import backup_db
@@ -50,7 +52,7 @@ def main() -> int:
     from pyrekordbox.db6 import tables
 
     # Build mik_key lookup from our DB
-    con = sqlite3.connect(Path.home() / "Music" / "dj-tools" / "dj.db")
+    con = sqlite3.connect(DB_PATH)
     con.row_factory = sqlite3.Row
     bp_to_mikkey = {
         r["beatport_id"]: r["mik_key"]
