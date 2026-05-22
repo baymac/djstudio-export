@@ -15,7 +15,7 @@ console = Console()
 
 _APP_DIR = Path(__file__).parent
 _PID_FILE = COURSE_PID_FILE
-_URL = "https://course.localhost"
+_FALLBACK_URL = "https://course.localhost"
 
 
 def _ensure_deps() -> None:
@@ -49,11 +49,30 @@ def _is_alive(pid: int) -> bool:
         return False
 
 
+def _get_url() -> str:
+    """Ask portless for the current URL of the 'course' app."""
+    try:
+        result = subprocess.run(
+            ["npx", "portless", "get", "course"],
+            cwd=_APP_DIR,
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+        url = result.stdout.strip()
+        if url.startswith("http"):
+            return url
+    except Exception:
+        pass
+    return _FALLBACK_URL
+
+
 def run_start() -> None:
     pid = _read_pid()
     if pid and _is_alive(pid):
-        console.print(f"[green]Course viewer already running[/green] → {_URL}")
-        _open(_URL)
+        url = _get_url()
+        console.print(f"[green]Course viewer already running[/green] → {url}")
+        _open(url)
         return
 
     _PID_FILE.parent.mkdir(parents=True, exist_ok=True)
@@ -70,9 +89,11 @@ def run_start() -> None:
     )
     _PID_FILE.write_text(str(proc.pid))
 
-    time.sleep(2)
-    console.print(f"[green]Course viewer started[/green] → {_URL}")
-    _open(_URL)
+    time.sleep(3)
+    url = _get_url()
+    console.print(f"[green]Course viewer started[/green] → {url}")
+    _hint_service_install(url)
+    _open(url)
 
 
 def run_stop() -> None:
@@ -94,3 +115,11 @@ def run_stop() -> None:
 
 def _open(url: str) -> None:
     subprocess.run(["open", url], check=False)
+
+
+def _hint_service_install(url: str) -> None:
+    if ":1355" in url or ":443" not in url.split("localhost", 1)[-1:]:
+        console.print(
+            "[dim]Tip: run [bold]npx portless service install[/bold] + "
+            "[bold]npx portless trust[/bold] once to get a port-free URL.[/dim]"
+        )
