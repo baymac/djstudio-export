@@ -23,6 +23,7 @@ load_dotenv(Path(__file__).parent / ".env", override=True)
 from detect.cli import add_detect_subparser, dispatch as dispatch_detect
 from sync.cli import add_sync_subparser, dispatch as dispatch_sync
 from playlist.cli import add_playlist_subparser, dispatch as dispatch_playlist
+from apps.course.cli import run_start as course_start, run_stop as course_stop
 
 
 def _build_parser():
@@ -49,6 +50,11 @@ Examples:
     sync_p = add_sync_subparser(sub)
     playlist_p = add_playlist_subparser(sub)
 
+    course_p = sub.add_parser("course", help="Start/stop the offline course viewer")
+    course_sub = course_p.add_subparsers(dest="course_action")
+    course_sub.add_parser("start", help=f"Start the viewer and open https://course.localhost")
+    course_sub.add_parser("stop", help="Stop the viewer")
+
     lb_p = sub.add_parser(
         "login-beatport",
         help="Fetch a fresh Beatport token and save it to .env",
@@ -65,7 +71,7 @@ Examples:
     mode.add_argument("--brave", action="store_true",
                       help="Read session cookie from Brave's local store (no browser window needed)")
 
-    return parser, detect_p, sync_p, playlist_p, lb_p
+    return parser, detect_p, sync_p, playlist_p, lb_p, course_p
 
 
 def _handle_login_beatport(args) -> None:
@@ -167,7 +173,7 @@ def _handle_login_beatport(args) -> None:
 
 
 def main() -> None:
-    parser, detect_p, sync_p, playlist_p, lb_p = _build_parser()
+    parser, detect_p, sync_p, playlist_p, lb_p, course_p = _build_parser()
     args = parser.parse_args()
 
     if args.command == "detect":
@@ -176,6 +182,13 @@ def main() -> None:
         dispatch_sync(args, sync_p)
     elif args.command == "playlist":
         dispatch_playlist(args, playlist_p)
+    elif args.command == "course":
+        if args.course_action == "start":
+            course_start()
+        elif args.course_action == "stop":
+            course_stop()
+        else:
+            course_p.print_help()
     elif args.command == "login-beatport":
         _handle_login_beatport(args)
     else:

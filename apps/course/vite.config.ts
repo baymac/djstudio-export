@@ -11,6 +11,6 @@ export default defineConfig({
   plugins: [react()],
   publicDir: djToolsDir,
   server: {
-    open: true,
+    open: false,
   },
 })
