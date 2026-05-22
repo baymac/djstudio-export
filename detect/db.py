@@ -231,6 +231,9 @@ def migrate() -> None:
         for _col, _typ in _BEATPORT_EXTRAS_COLS:
             _add_column_if_missing(con, "enriched_tracks", _col, _typ)
 
+        # Additive migration: duplicate count on enrich_runs.
+        _add_column_if_missing(con, "enrich_runs", "duplicate", "INTEGER DEFAULT 0")
+
         # Additive migration: flip the FK direction so many detected_tracks can
         # share one enriched_tracks row without copying data.
         _add_column_if_missing(con, "detected_tracks", "enriched_track_id", "INTEGER REFERENCES enriched_tracks(id)")
@@ -874,14 +877,14 @@ def start_enrich_run() -> int:
 
 
 def finish_enrich_run(
-    run_id: int, seen: int, found: int, not_found: int, fuzzy_miss: int
+    run_id: int, seen: int, found: int, not_found: int, fuzzy_miss: int, duplicate: int = 0
 ) -> None:
     with _connect() as con:
         con.execute(
             """UPDATE enrich_runs
-               SET finished_at=?, seen=?, found=?, not_found=?, fuzzy_miss=?, status='done'
+               SET finished_at=?, seen=?, found=?, not_found=?, fuzzy_miss=?, duplicate=?, status='done'
                WHERE id=?""",
-            (_now(), seen, found, not_found, fuzzy_miss, run_id),
+            (_now(), seen, found, not_found, fuzzy_miss, duplicate, run_id),
         )
 
 

@@ -2922,6 +2922,7 @@ def dispatch(args, detect_p: argparse.ArgumentParser) -> None:
         t.add_column("Finished",   style="dim", width=20)
         t.add_column("Seen",       style="dim", width=6)
         t.add_column("Enriched",   style="green", width=9)
+        t.add_column("Duplicate",  style="dim", width=10)
         t.add_column("No results", style="yellow", width=11)
         t.add_column("Fuzzy miss", style="yellow", width=11)
         t.add_column("Status",     style="dim", width=8)
@@ -2932,6 +2933,7 @@ def dispatch(args, detect_p: argparse.ArgumentParser) -> None:
                 (r["finished_at"] or "—")[:19],
                 str(r["seen"]),
                 str(r["found"]),
+                str(r["duplicate"] or 0),
                 str(r["not_found"]),
                 str(r["fuzzy_miss"]),
                 r["status"] or "—",

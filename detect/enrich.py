@@ -224,7 +224,7 @@ def run_enrich(
                 if not dry_run and existing_bp_id is not None:
                     linked = detect_db.link_detected_to_enriched(track_id, existing_bp_id)
                     if linked:
-                        counts["found"] += 1
+                        counts["duplicate"] += 1
                         _log(
                             f"duplicate  {artist} — {title}  (linked to bp:{existing_bp_id})",
                             f"[dim]duplicate (linked):[/dim] {artist} — {title}",
@@ -379,6 +379,7 @@ def run_enrich(
             found=counts["found"],
             not_found=counts["not_found"],
             fuzzy_miss=counts["fuzzy_miss"],
+            duplicate=counts["duplicate"],
         )
 
     summary = [
