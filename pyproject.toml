@@ -36,4 +36,4 @@ build-backend = "setuptools.build_meta"
 py-modules = ["dj_cli", "paths", "caffeinate"]
 
 [tool.setuptools.packages.find]
-include = ["detect*", "sync*", "playlist*", "connections*", "djstudio*", "rekordbox*", "helpers*"]
+include = ["detect*", "sync*", "playlist*", "connections*", "djstudio*", "rekordbox*", "helpers*", "apps*"]
