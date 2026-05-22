@@ -794,10 +794,11 @@ downloader.
 
 ## 1001tracklists PiP — Chrome extension
 
-A Chrome MV3 extension at `apps/1001T-extension/` that opens a YouTube DJ mix in a
-floating Document Picture-in-Picture window with the full tracklist from
+PiP a DJ mix and see the tracklist while continuing your work. A Chrome MV3
+extension at `apps/1001T-extension/` that opens a YouTube DJ mix in a floating
+Document Picture-in-Picture window with the full tracklist from
 1001tracklists.com overlaid inside it. The current track highlights as the mix
-plays, so you can keep mixing reference up on screen while doing other work.
+plays, so the video and the IDs stay on top of whatever else you're doing.
 
 ![1001T PiP window with tracklist overlay](apps/1001T-extension/screenshot.png)
 
