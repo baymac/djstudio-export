@@ -37,6 +37,15 @@ export async function loadLessons(courseId: string, name: string): Promise<void>
       `  uv run helpers/download_course.py download <course_url> --out-dir ~/Music/dj-tools/${courseId}`
     )
   }
+  // Vite's dev server returns 200 + index.html (SPA fallback) for missing
+  // files in publicDir — typically a broken symlink to an unmounted drive.
+  const ct = res.headers.get('content-type') || ''
+  if (!ct.includes('json')) {
+    throw new Error(
+      `Course "${courseId}" is unavailable — ~/Music/dj-tools/${courseId}/lessons.json ` +
+      `is missing or its symlink target isn't mounted.`
+    )
+  }
   lessons = await res.json()
 }
 

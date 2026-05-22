@@ -20,21 +20,38 @@ async function boot() {
     return
   }
 
+  // Try saved course first, then walk through the rest so a single broken
+  // course (e.g. unmounted external drive) doesn't block the whole app.
   const savedId = localStorage.getItem(STORAGE_KEY)
-  const course = courses.find(c => c.id === savedId) || courses[0]
+  const ordered = [
+    ...(savedId ? courses.filter(c => c.id === savedId) : []),
+    ...courses.filter(c => c.id !== savedId),
+  ]
+  const errors: string[] = []
+  let loaded = false
 
-  try {
-    await loadLessons(course.id, course.name)
-    localStorage.setItem(STORAGE_KEY, course.id)
+  for (const course of ordered) {
+    try {
+      await loadLessons(course.id, course.name)
+      localStorage.setItem(STORAGE_KEY, course.id)
+      loaded = true
+      break
+    } catch (err: any) {
+      errors.push(`• ${course.name}: ${err.message}`)
+    }
+  }
+
+  if (loaded) {
     ReactDOM.createRoot(document.getElementById('root')!).render(
       <React.StrictMode>
         <RouterProvider router={router} />
       </React.StrictMode>
     )
-  } catch (err: any) {
+  } else {
     document.getElementById('root')!.innerHTML = `
       <div style="font-family:monospace;padding:2rem;color:#ef4444">
-        <strong>Error loading course:</strong><br/><br/>${err.message}
+        <strong>No usable courses found.</strong><br/><br/>
+        ${errors.join('<br/>')}
       </div>
     `
   }
