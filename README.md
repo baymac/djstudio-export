@@ -792,6 +792,51 @@ downloader.
 
 ---
 
+## 1001tracklists PiP — Chrome extension
+
+A Chrome MV3 extension at `apps/1001T-extension/` that opens a YouTube DJ mix in a
+floating Document Picture-in-Picture window with the full tracklist from
+1001tracklists.com overlaid inside it. The current track highlights as the mix
+plays, so you can keep mixing reference up on screen while doing other work.
+
+![1001T PiP window with tracklist overlay](apps/1001T-extension/screenshot.png)
+
+**Flow:**
+
+1. Open any tracklist page on `1001tracklists.com/tracklist/…`
+2. A red **"Open PiP + Tracklist"** button appears top-right — click it
+3. The matching YouTube video opens in a new tab; a second red button appears there
+4. Click that second button → the floating PiP window appears with video + scrollable tracklist
+5. As the mix plays, the active track highlights and the list auto-scrolls
+
+The last 20 tracklists are cached locally, so revisiting a YouTube video without
+going through 1001TL still shows the button. Keyboard shortcut `Cmd+Shift+P` /
+`Ctrl+Shift+P` opens PiP from whichever tab (1001TL or YouTube) is active.
+
+**Install (unpacked):**
+
+```bash
+# 1. Open chrome://extensions (or brave://extensions)
+# 2. Enable "Developer mode" (top-right toggle)
+# 3. Click "Load unpacked" and pick:
+#    apps/1001T-extension/extension/
+```
+
+No toolbar button — the extension works purely via the injected floating buttons
+on 1001TL and YouTube pages.
+
+**End-to-end QA** (headed Chromium via Playwright):
+
+```bash
+cd apps/1001T-extension
+npm install
+node qa-test.js          # screenshots → qa-screenshots/
+```
+
+See `apps/1001T-extension/README.md` for the full file layout and dev notes.
+
+---
+
 ## Tests
 
 ```bash
@@ -855,6 +900,10 @@ apps/                           Frontend apps exposed via `dj <name>` commands
     src/                        React app: sidebar, lesson view, quiz, video
     vite.config.ts              publicDir = ~/Music/dj/;
                                 reads PORT/HOST env vars portless injects
+  1001T-extension/              Chrome MV3 extension — floating PiP + tracklist overlay
+    extension/                  manifest, background worker, content scripts, icons
+    qa-test.js                  Playwright headed end-to-end QA
+    screenshot.png              PiP window with active-track highlight
 
 helpers/                        Standalone maintenance scripts + course tools
   download_course.py            Course downloader (browser scrape + Dyntube/Circle HLS)
