@@ -10,7 +10,7 @@ For each lesson:
   3. Saves a screenshot
   4. Saves a JSON report of *live DOM signals*
 
-Output: ~/Music/dj-tools/course/_recon/index.md + per-lesson .png + .json
+Output: ~/Music/dj/course/_recon/index.md + per-lesson .png + .json
 """
 from __future__ import annotations
 
@@ -26,7 +26,7 @@ from paths import COURSE_DIR  # noqa: E402
 RECON_DIR = COURSE_DIR / "_recon"
 
 import json as _json
-_lessons = _json.loads((Path.home()/'Music/dj-tools/course/lessons.json').read_text())
+_lessons = _json.loads((COURSE_DIR / 'lessons.json').read_text())
 _idx_to_url = lambda i: _lessons[i-1]['url']
 
 TARGETS = [

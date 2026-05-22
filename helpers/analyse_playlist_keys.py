@@ -26,10 +26,10 @@ import argparse
 import subprocess
 import sys
 import time
-from pathlib import Path
 
 from rich.console import Console
 
+from paths import DB_PATH
 from rekordbox.utils import beatport_id_from_folder_path
 
 console = Console()
@@ -72,7 +72,7 @@ def main() -> int:
     )
 
     # ── Step 2: filter out tracks already analyzed ──────────────────────────
-    con = sqlite3.connect(Path.home() / "Music" / "dj-tools" / "dj.db")
+    con = sqlite3.connect(DB_PATH)
     already = {
         r[0] for r in con.execute(
             f"SELECT beatport_id FROM enriched_tracks_analysis "
