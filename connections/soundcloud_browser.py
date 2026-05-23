@@ -19,7 +19,7 @@ from urllib.parse import urlparse
 
 from playwright.async_api import async_playwright
 
-from .brave_cookies import read_cookies_for_domain
+from .cookies import read_cookies_for_domain
 
 
 _USER_AGENT = (

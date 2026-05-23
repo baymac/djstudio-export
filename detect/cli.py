@@ -62,6 +62,7 @@ from .tracklists1001 import (
     extract_title_from_text as tracklists1001_extract_title,
     open_editor_for_url as tracklists1001_open_editor,
 )
+from .tracklists1001_api import fetch_tracklist_text as tracklists1001_fetch
 from .text import extract_from_text as text_extract_from_text, open_editor_for_session as text_open_editor
 from .shazam import RECOGNIZE_TIMEOUT, format_result, recognize_file
 
@@ -1594,6 +1595,10 @@ Examples:
     tl_p.add_argument("url", help="1001tracklists.com tracklist URL")
     tl_p.add_argument("--dry-run", action="store_true",
                       help="Run detection but skip all DB writes")
+    tl_p.add_argument("--paste", action="store_true",
+                      help="Force legacy vi-paste flow (skip cookie fetch)")
+    tl_p.add_argument("--browser", choices=["brave", "chrome", "safari", "firefox"],
+                      default="brave", help="Browser to read 1001tracklists cookies from (default: brave)")
 
     # 1001tracklists-history
     tl_hist_p = sub.add_parser("1001tracklists-history", help="Browse 1001tracklists scans")
@@ -2028,11 +2033,23 @@ def dispatch(args, detect_p: argparse.ArgumentParser) -> None:
         if args.dry_run:
             console.print("  [yellow]Dry run — no DB writes[/yellow]")
 
-        console.print(
-            f"\n[bold]Paste the 1001tracklists.com tracklist into vi, then save and quit (:wq).[/bold]\n"
-            f"[dim]URL: {url}[/dim]\n"
-        )
-        raw_text = tracklists1001_open_editor(url)
+        if args.paste:
+            console.print(
+                f"\n[bold]Paste the 1001tracklists.com tracklist into vi, then save and quit (:wq).[/bold]\n"
+                f"[dim]URL: {url}[/dim]\n"
+            )
+            raw_text = tracklists1001_open_editor(url)
+        else:
+            console.print(f"  Fetching tracklist via {args.browser} cookies…")
+            try:
+                raw_text = tracklists1001_fetch(url, args.browser)
+            except Exception as exc:
+                console.print(f"  [yellow]Cookie fetch failed ({exc}) — falling back to vi paste.[/yellow]")
+                console.print(
+                    f"\n[bold]Paste the 1001tracklists.com tracklist into vi, then save and quit (:wq).[/bold]\n"
+                    f"[dim]URL: {url}[/dim]\n"
+                )
+                raw_text = tracklists1001_open_editor(url)
 
         tracks, skipped = tracklists1001_extract_from_text(raw_text)
         if not tracks:

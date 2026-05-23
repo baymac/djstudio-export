@@ -46,7 +46,6 @@ BACKUPS_DIR = DJ_DIR / "backups"
 # State files
 IG_SESSION_FILE = STATE_DIR / "ig_session.json"
 DETECT_CONFIG_FILE = STATE_DIR / "detect_config.json"
-BROWSER_PROFILE_DIR = STATE_DIR / "browser-profile"
 
 # Cache
 MUSICKIT_CACHE_DIR = CACHE_DIR / "musickit"

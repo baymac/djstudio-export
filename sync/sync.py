@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import csv
-import os
 import sys
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
@@ -46,54 +45,14 @@ _BEATPORT_CSV = _REPO_ROOT / ".context" / "attachments" / "My Beatport Library.c
 
 
 def get_or_refresh_token() -> str:
-    """Return a Beatport Bearer token.
-
-    Priority:
-    1. BEATPORT_ACCESS_TOKEN env var
-    2. Cached token in DB
-    3. Refresh via BEATPORT_SESSION_TOKEN cookie
-    4. Browser login via BEATPORT_USERNAME + BEATPORT_PASSWORD
-    """
-    import time as _time
-    session_cookie = os.environ.get("BEATPORT_SESSION_TOKEN", "").strip()
-
-    access_token = os.environ.get("BEATPORT_ACCESS_TOKEN", "").strip()
-    if access_token:
-        if not access_token.startswith("Bearer "):
-            access_token = f"Bearer {access_token}"
-        payload = api._jwt_payload(access_token)
-        if payload.get("exp", 0) > _time.time():
-            return access_token
-        # expired — fall through to refresh
-
-    if session_cookie:
-        new_token = api.refresh_via_session(session_cookie)
-        if new_token:
-            api.save_token_to_env(new_token)
-            return new_token
-
-    username = os.environ.get("BEATPORT_USERNAME", "").strip()
-    password = os.environ.get("BEATPORT_PASSWORD", "").strip() or None
-
-    console.print("[yellow]Session expired — trying browser login (headless)…[/yellow]")
-    try:
-        token, session = api.capture_token(username or None, password, headless=True)
-        api.save_token_to_env(token, session)
+    """Return a Beatport Bearer token via the shared auto-resolve cascade."""
+    token = api.resolve_access_token()
+    if token:
         return token
-    except Exception:
-        pass
-
-    console.print("[yellow]Headless login failed — opening browser window…[/yellow]")
-    try:
-        token, session = api.capture_token(username or None, password, headless=False)
-        api.save_token_to_env(token, session)
-        return token
-    except Exception:
-        pass
-
     console.print(
-        "[red]Session expired and browser login failed.[/red]\n"
-        "Run [bold]dj login-beatport --ui[/bold] to log in interactively."
+        "[red]Could not get a valid Beatport token.[/red]\n"
+        "Tried env session cookie and the browser cookie store. "
+        "Log into beatport.com in your default browser, then re-run."
     )
     sys.exit(1)
 
@@ -105,24 +64,16 @@ def make_bp_client() -> tuple[api.Beatport, object]:
     def on_401():
         nonlocal token
         console.print("[yellow]Token expired — refreshing via session…[/yellow]")
-        import os as _os
-        session_cookie = _os.environ.get("BEATPORT_SESSION_TOKEN", "").strip()
-        if session_cookie:
-            new_token = api.refresh_via_session(session_cookie)
-            if new_token:
-                token = new_token
-                client.headers["authorization"] = token
-                api.save_token_to_env(token)
-                console.print("[dim]Token refreshed.[/dim]")
-                return
+        new_token = api.resolve_access_token(force_refresh=True)
+        if new_token:
+            token = new_token
+            client.headers["authorization"] = token
+            console.print("[dim]Token refreshed.[/dim]")
+            return
         console.print(
-            "[red]Token expired and session refresh failed.[/red]\n\n"
-            "The session cookie's refresh token has been rotated. Get fresh tokens:\n"
-            "  1. Open beatport.com in a browser (logged in)\n"
-            "  2. DevTools → Network → /api/auth/session → copy token.accessToken\n"
-            "     → set as [bold]BEATPORT_ACCESS_TOKEN[/bold] in .env\n"
-            "  3. DevTools → Application → Cookies → copy [bold]__Secure-next-auth.session-token[/bold]\n"
-            "     → set as [bold]BEATPORT_SESSION_TOKEN[/bold] in .env"
+            "[red]Token expired and session refresh failed.[/red]\n"
+            "Tried env session cookie and the browser cookie store. "
+            "Log into beatport.com in your default browser, then re-run."
         )
         sys.exit(1)
 
@@ -387,6 +338,56 @@ def run_sync(
 
             match, score = matching.best_match(name, artist, results, threshold)
             if not match:
+                # Try splitting vs./& mashup tracks before giving up.
+                variants = matching.split_mashup_variants(name, artist)
+                split_count = 0
+                for v_name, v_artist in variants:
+                    v_results = beatport.search_tracks(
+                        f"{v_artist} {matching.search_query(v_name)}", per_page=10, debug=verbose
+                    )
+                    if not v_results:
+                        continue
+                    v_match, v_score = matching.best_match(v_name, v_artist, v_results, threshold)
+                    if not v_match:
+                        continue
+                    if is_playlist_mode:
+                        v_dest_name = source_key
+                    else:
+                        v_bp_genre = (v_match.get("genre") or {}).get("name")
+                        v_dest_name = classifier.classify(v_bp_genre)
+                        if not v_dest_name:
+                            continue
+                    v_track_id = v_match.get("id")
+                    v_dest_id = dest_map.get(v_dest_name)
+                    if not v_dest_id:
+                        continue
+                    v_url = _bp_url(v_match)
+                    url_sfx = f"  {v_url}" if v_url else ""
+                    if v_track_id and v_track_id in dest_track_ids.get(v_dest_name, set()):
+                        split_count += 1
+                        _log(f"split_dup  {v_artist} — {v_name} → {v_dest_name} (score={v_score:.2f}){url_sfx}")
+                        continue
+                    if dry_run:
+                        split_count += 1
+                        _log(f"split_would_add  {v_artist} — {v_name} → {v_dest_name} (score={v_score:.2f}){url_sfx}")
+                        continue
+                    try:
+                        resp = beatport.add_track(v_dest_id, v_track_id)
+                        items = resp.get("items") or []
+                        if items and v_track_id:
+                            dest_track_ids.setdefault(v_dest_name, set()).add(v_track_id)
+                        split_count += 1
+                        counts["added"] += 1
+                        _log(f"split_added  {v_artist} — {v_name} → {v_dest_name} (score={v_score:.2f}){url_sfx}")
+                    except Exception as e:
+                        _log(f"split_add_failed  {v_artist} — {v_name}: {e}")
+
+                if split_count > 0:
+                    if not dry_run:
+                        db.mark_synced(catalog_id, source_key, "split_added")
+                        synced_set.add(catalog_id)
+                    continue
+
                 if not dry_run:
                     db.mark_synced(catalog_id, source_key, "fuzzy_miss")
                     synced_set.add(catalog_id)
@@ -394,7 +395,7 @@ def run_sync(
                 best = results[0]
                 bp_artists = ", ".join(a.get("name", "") for a in best.get("artists", []))
                 _log(
-                    f"fuzzy_miss  {artist} — {name}  →  best: {bp_artists} — {best.get('name', '')}",
+                    f"fuzzy_miss  {artist} — {name}  score={score:.2f}  best: {bp_artists} — {best.get('name', '')}",
                     f"[yellow]fuzzy miss:[/yellow] {artist} — {name}"
                     f"  →  best: {bp_artists} — {best.get('name', '')} (score below threshold)",
                 )

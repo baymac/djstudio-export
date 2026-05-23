@@ -9,7 +9,8 @@ Usage:
     # or pass the numeric track ID directly
     uv run python helpers/delete_beatport_track.py --track 26895695 --playlist "Tech House"
 
-Requires BEATPORT_USERNAME and BEATPORT_PASSWORD environment variables.
+Beatport auth is handled by the shared auto-resolve cascade
+(env access token → env session cookie → browser cookie store).
 """
 from __future__ import annotations
 
@@ -20,7 +21,6 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from connections import beatport as api
 from sync import db, sync
 
 
@@ -59,8 +59,7 @@ def main() -> None:
     print(f"Playlist : {playlist_name!r}")
 
     db.init_db()
-    username, password = sync.require_env()
-    beatport, http_client = sync.make_bp_client(username, password)
+    beatport, http_client = sync.make_bp_client()
 
     try:
         playlists = beatport.list_my_playlists()

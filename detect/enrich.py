@@ -1,7 +1,6 @@
 """Enrich detected tracks with Beatport metadata (bpm, key, genre, release_date, beatport_id, beatport_link)."""
 from __future__ import annotations
 
-import os
 import re
 import sys
 from datetime import datetime
@@ -46,57 +45,19 @@ def _base_key(artist: str, title: str) -> tuple[str, str]:
 
 
 def _get_token() -> str:
-    """Get a Beatport Bearer token.
-
-    Priority:
-    1. BEATPORT_ACCESS_TOKEN env var (valid JWT)
-    2. BEATPORT_SESSION_TOKEN cookie → refresh via /api/auth/session
-    """
-    import time as _time
-
-    access_token = os.environ.get("BEATPORT_ACCESS_TOKEN", "").strip()
-    if access_token:
-        if not access_token.startswith("Bearer "):
-            access_token = f"Bearer {access_token}"
-        payload = bp_api._jwt_payload(access_token)
-        if payload.get("exp", 0) > _time.time():
-            return access_token
-
-    session_cookie = os.environ.get("BEATPORT_SESSION_TOKEN", "").strip()
-    if session_cookie:
-        new_token = bp_api.refresh_via_session(session_cookie)
-        if new_token:
-            bp_api.save_token_to_env(new_token)
-            return new_token
-
+    token = bp_api.resolve_access_token()
+    if token:
+        return token
     console.print(
         "[red]Beatport token expired and session refresh failed.[/red]\n"
-        "Run [bold]dj login-beatport --brave[/bold] to grab a fresh session from Brave.\n"
-        "Or [bold]dj login-beatport --ui[/bold] to log in interactively."
+        "Tried env session cookie and the browser cookie store. "
+        "Log into beatport.com in your default browser, then re-run."
     )
     sys.exit(1)
 
 
 def _try_refresh() -> Optional[str]:
-    """Try to refresh the access token via the NextAuth session cookie.
-
-    Matches the --cookie login flow: reads session from os.environ with a
-    fallback to the .env file directly (so callers that didn't call
-    load_dotenv still work), then saves the refreshed token back to .env.
-    """
-    session_cookie = os.environ.get("BEATPORT_SESSION_TOKEN", "").strip()
-    if not session_cookie:
-        try:
-            from dotenv import dotenv_values
-            session_cookie = dotenv_values(".env").get("BEATPORT_SESSION_TOKEN", "").strip()
-        except Exception:
-            pass
-    if not session_cookie:
-        return None
-    new_token = bp_api.refresh_via_session(session_cookie)
-    if new_token:
-        bp_api.save_token_to_env(new_token)
-    return new_token
+    return bp_api.resolve_access_token(force_refresh=True)
 
 
 def _bp_meta(match: dict) -> dict:
@@ -144,10 +105,16 @@ def run_enrich(
         tracks = tracks[:limit]
 
     if not tracks:
-        console.print("Nothing to enrich — all detected tracks already have Beatport data.")
+        secret_n = detect_db.count_secret_tracks()
+        msg = "Nothing to enrich — all detected tracks already have Beatport data."
+        if secret_n:
+            msg += f" ({secret_n} secret/ID-placeholder tracks skipped)"
+        console.print(msg)
         return
 
-    console.print(f"[bold]{len(tracks)}[/bold] tracks to enrich")
+    secret_n = detect_db.count_secret_tracks()
+    secret_note = f"  [dim]({secret_n} secret/ID-placeholder tracks skipped)[/dim]" if secret_n else ""
+    console.print(f"[bold]{len(tracks)}[/bold] tracks to enrich{secret_note}")
 
     token = _get_token()
     http_client = bp_api.make_client(token)
@@ -250,8 +217,7 @@ def run_enrich(
                 progress.stop()
                 console.print(
                     "\n[red]Auth failed:[/red] Beatport session refresh failed after retrying.\n"
-                    "Run [bold]dj login-beatport --brave[/bold] to grab a fresh session from Brave,\n"
-                    "or [bold]dj login-beatport --ui[/bold] to log in interactively."
+                    "Log into beatport.com in your default browser, then re-run."
                 )
                 http_client.close()
                 sys.exit(1)

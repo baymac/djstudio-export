@@ -1,7 +1,6 @@
 """Beatport HTTP API client and token capture."""
 from __future__ import annotations
 
-import asyncio
 import base64
 import json
 import sys
@@ -10,7 +9,6 @@ from dataclasses import dataclass, field
 from typing import Callable, Optional
 
 import httpx
-from playwright.async_api import async_playwright
 
 API_ROOT = "https://api.beatport.com/v4"
 USER_AGENT = (
@@ -21,323 +19,32 @@ USER_AGENT = (
 
 # ---------- Auth ----------
 
-from paths import BROWSER_PROFILE_DIR as _BROWSER_PROFILE_PATH
-_BROWSER_PROFILE = str(_BROWSER_PROFILE_PATH)
-
-# Real browser executables on macOS — using the actual binary avoids Cloudflare's
-# headless-Chromium fingerprint detection.
-_BROWSER_CANDIDATES = [
-    "/Applications/Brave Browser.app/Contents/MacOS/Brave Browser",
-    "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
-    "/Applications/Chromium.app/Contents/MacOS/Chromium",
-]
-
-
-def _find_real_browser() -> Optional[str]:
-    import os as _os
-    for path in _BROWSER_CANDIDATES:
-        if _os.path.exists(path):
-            return path
-    return None
-
-
-async def _capture_session_cookie_async(
-    username: Optional[str] = None,
-    password: Optional[str] = None,
-    headless: bool = True,
-) -> str:
-    """Open browser, return __Secure-next-auth.session-token cookie.
-
-    If already logged in (persistent profile), grabs cookie immediately.
-    Only fills the login form if it appears AND username+password are provided.
-    """
-    exe = _find_real_browser()
-    args = ["--no-sandbox"]
-    if not headless:
-        args += ["--window-size=1440,900"]
-
-    async with async_playwright() as p:
-        context = await p.chromium.launch_persistent_context(
-            _BROWSER_PROFILE,
-            headless=headless,
-            args=args,
-            user_agent=USER_AGENT,
-            viewport={"width": 1440, "height": 900},
-            **({"executable_path": exe} if exe else {}),
-        )
-        for p in context.pages:
-            await p.close()
-        page = await context.new_page()
-        await page.goto("https://www.beatport.com/", wait_until="domcontentloaded")
-        try:
-            await page.wait_for_function(
-                "() => !document.title.includes('Just a moment')",
-                timeout=15000,
-            )
-        except Exception:
-            pass
-        await page.wait_for_timeout(1000)
-        try:
-            await page.locator("#onetrust-accept-btn-handler").click(timeout=2000)
-        except Exception:
-            pass
-        await page.goto("https://account.beatport.com/settings", wait_until="domcontentloaded")
-        # Wait for Cloudflare challenge to auto-resolve (title changes from "Just a moment...")
-        try:
-            await page.wait_for_function(
-                "() => !document.title.includes('Just a moment')",
-                timeout=15000,
-            )
-        except Exception:
-            pass
-        await page.wait_for_timeout(1000)
-        login_form_visible = await page.locator("input[name='username']").count() > 0
-        if login_form_visible:
-            if username and password:
-                await page.fill("input[name='username']", username)
-                await page.fill("input[name='password']", password)
-                await page.click("button[type='submit']")
-                await page.wait_for_timeout(3000)
-            elif not headless:
-                # Visible browser — let user log in interactively
-                print("\n>>> Log in to Beatport in the browser window that just opened.")
-                print(">>> This window will close automatically once you're logged in.\n")
-            else:
-                raise RuntimeError(
-                    "Beatport login form appeared but no credentials provided.\n"
-                    "Set BEATPORT_USERNAME and BEATPORT_PASSWORD in .env, or use --ui\n"
-                    "to log in interactively."
-                )
-        await page.goto("https://www.beatport.com/library/playlists", wait_until="domcontentloaded")
-        try:
-            await page.wait_for_function(
-                "() => !document.title.includes('Just a moment')",
-                timeout=15000,
-            )
-        except Exception:
-            pass
-        await page.wait_for_timeout(2000)
-        # Dismiss cookie consent modal if it reappears
-        try:
-            await page.locator("#onetrust-accept-btn-handler").click(timeout=2000)
-            await page.wait_for_timeout(1000)
-        except Exception:
-            pass
-        # Dismiss any generic close-button modal
-        for sel in ["button[aria-label='Close']", "button[aria-label='close']", "[data-testid='modal-close']"]:
-            try:
-                await page.locator(sel).click(timeout=1000)
-                await page.wait_for_timeout(500)
-            except Exception:
-                pass
-        await page.wait_for_timeout(2000)
-
-        def _find_session_cookie(cookies: list) -> Optional[str]:
-            for c in cookies:
-                if c.get("name") == "__Secure-next-auth.session-token":
-                    return c.get("value")
-            return None
-
-        session_cookie = _find_session_cookie(await context.cookies())
-
-        # Visible browser: poll until session cookie appears (user may still be logging in)
-        if not session_cookie and not headless:
-            print("Waiting for Beatport login… (up to 2 minutes)")
-            for _ in range(60):
-                await page.wait_for_timeout(2000)
-                session_cookie = _find_session_cookie(await context.cookies())
-                if session_cookie:
-                    break
-
-        await context.close()
-
-    if not session_cookie:
-        raise RuntimeError(
-            "Beatport login failed — session cookie not found.\n"
-            "Check BEATPORT_USERNAME and BEATPORT_PASSWORD.\n"
-            "If Cloudflare blocks headless mode, retry with --ui flag."
-        )
-    return session_cookie
-
-
 
 _BEATPORT_SESSION_COOKIE_NAME = "__Secure-next-auth.session-token"
 
 
-_CDP_PORT_DEFAULT = 9222
-_CDP_BASE_DEFAULT = f"http://127.0.0.1:{_CDP_PORT_DEFAULT}"
+def _read_beatport_cookies_from_browser() -> tuple[str, str]:
+    """Read (session_cookie, cf_clearance) from the local browser cookie store.
 
-
-def _cdp_endpoint_alive(base_url: str) -> bool:
-    try:
-        r = httpx.get(f"{base_url}/json/version", timeout=2)
-        return r.status_code == 200
-    except Exception:
-        return False
-
-
-async def _fetch_session_via_cdp(cdp_url: str) -> tuple[dict, str, str]:
-    """Drive the user's already-running Brave (via CDP) to fetch /api/auth/session.
-
-    Brave's `cf_clearance` is bound to Brave's actual TLS fingerprint. By
-    connecting Playwright over CDP we run the request *inside* Brave itself —
-    same TLS, same cookies, same everything Cloudflare whitelisted. Returns
-    (json_data, current_session_cookie, current_cf_clearance) so the caller
-    can persist any rotations.
+    Browser defaults to whatever `connections.cookies.DEFAULT_BROWSER` is
+    (currently Brave). Raises RuntimeError if the browser/cookies are
+    unreadable; returns empty strings for individual cookies that aren't set.
     """
-    async with async_playwright() as p:
-        browser = await p.chromium.connect_over_cdp(cdp_url)
-        try:
-            context = browser.contexts[0] if browser.contexts else await browser.new_context()
-            # Reuse an existing beatport tab if one is open; otherwise pop a new one.
-            page = next(
-                (pg for pg in context.pages if "beatport.com" in (pg.url or "")),
-                None,
-            )
-            if page is None:
-                page = await context.new_page()
-                await page.goto("https://www.beatport.com/", wait_until="domcontentloaded", timeout=30_000)
-                try:
-                    await page.wait_for_function(
-                        "() => !document.title.includes('Just a moment')",
-                        timeout=15_000,
-                    )
-                except Exception:
-                    pass
-
-            fetch_result = await page.evaluate(
-                """async () => {
-                    try {
-                        const r = await fetch('/api/auth/session', {
-                            credentials: 'include',
-                            headers: { 'accept': 'application/json' },
-                        });
-                        const text = await r.text();
-                        return { ok: r.ok, status: r.status, body: text };
-                    } catch (e) {
-                        return { ok: false, status: 0, body: String(e) };
-                    }
-                }"""
-            )
-            if not fetch_result.get("ok"):
-                raise RuntimeError(
-                    f"In-Brave fetch /api/auth/session returned HTTP "
-                    f"{fetch_result.get('status')} (body head={fetch_result.get('body', '')[:200]!r})"
-                )
-            body = fetch_result.get("body", "")
-            try:
-                data = json.loads(body)
-            except json.JSONDecodeError as exc:
-                raise RuntimeError(
-                    f"NextAuth /api/auth/session returned non-JSON body "
-                    f"(head={body[:200]!r}): {exc}"
-                )
-
-            session_cookie = ""
-            cf_clear = ""
-            for c in await context.cookies("https://www.beatport.com"):
-                if c.get("name") == _BEATPORT_SESSION_COOKIE_NAME:
-                    session_cookie = c.get("value", "")
-                elif c.get("name") == "cf_clearance":
-                    cf_clear = c.get("value", "")
-            return data, session_cookie, cf_clear
-        finally:
-            # Don't close the browser — it's the user's. Just disconnect.
-            try:
-                await browser.close()
-            except Exception:
-                pass
-
-
-def capture_session_via_cdp(cdp_url: Optional[str] = None) -> str:
-    """Attach to running Brave via CDP and capture the access token directly.
-
-    Brave must be launched with `--remote-debugging-port=9222` (quit Brave
-    first, then run from a new terminal):
-        "/Applications/Brave Browser.app/Contents/MacOS/Brave Browser" \\
-          --remote-debugging-port=9222
-
-    The user must already be signed in to beatport.com in that Brave window.
-    """
-    base = cdp_url or _CDP_BASE_DEFAULT
-    if not _cdp_endpoint_alive(base):
-        raise RuntimeError(
-            f"No CDP endpoint at {base}. Quit Brave, then in a new terminal run:\n\n"
-            f'  "/Applications/Brave Browser.app/Contents/MacOS/Brave Browser" '
-            f"--remote-debugging-port={_CDP_PORT_DEFAULT}\n\n"
-            "Sign in to beatport.com in that Brave window, then re-run this command."
-        )
-
-    data, session_cookie, cf_clear = asyncio.run(_fetch_session_via_cdp(base))
-
-    token_data = data.get("token") or {}
-    err = token_data.get("error")
-    if err:
-        raise RuntimeError(
-            f"NextAuth returned token.error={err!r}. Sign out and back in to "
-            "beatport.com in Brave, then re-run."
-        )
-    access = token_data.get("accessToken")
-    if not access:
-        raise RuntimeError(
-            f"No accessToken in /api/auth/session response (token keys={list(token_data.keys())})"
-        )
-    bearer = f"Bearer {access}"
-    if _jwt_payload(bearer).get("exp", 0) <= time.time():
-        raise RuntimeError("accessToken returned but already expired by JWT exp.")
-
-    if session_cookie:
-        save_token_to_env(bearer, session_cookie)
-    else:
-        save_token_to_env(bearer)
-    if cf_clear:
-        save_cf_clearance_to_env(cf_clear)
-    return bearer
-
-
-
-def capture_session_from_brave() -> str:
-    """Read the Beatport session cookie directly from Brave's local store.
-
-    Works while Brave is running (opens the SQLite cookie DB read-only/immutable).
-    Raises RuntimeError if Brave isn't installed, you're not logged into Beatport,
-    or the macOS Keychain decryption fails.
-    """
-    from connections.brave_cookies import read_cookies_for_domain
+    from connections.cookies import read_cookies_for_domain
     cookies = read_cookies_for_domain("beatport.com")
+    session = ""
+    cf_clear = ""
     for c in cookies:
         if c["name"] == _BEATPORT_SESSION_COOKIE_NAME:
-            return c["value"]
-    raise RuntimeError(
-        f"Cookie '{_BEATPORT_SESSION_COOKIE_NAME}' not found in Brave's Beatport store. "
-        "Make sure you're logged into beatport.com in Brave."
-    )
-
-
-def capture_token(username: Optional[str] = None, password: Optional[str] = None, headless: bool = True) -> tuple[str, str]:
-    """Browser login → (access_token, session_cookie).
-
-    Gets session cookie via browser, then uses refresh_via_session to get the
-    access token. NextAuth rotates the session cookie on every refresh, and
-    refresh_via_session persists the rotated cookie to .env. We read it back
-    here so the returned cookie is the one currently valid server-side, not
-    the (now-invalidated) one we captured from the browser.
-    """
-    session_cookie = asyncio.run(_capture_session_cookie_async(username, password, headless=headless))
-    access_token = refresh_via_session(session_cookie)
-    if not access_token:
+            session = c["value"]
+        elif c["name"] == "cf_clearance":
+            cf_clear = c["value"]
+    if not session:
         raise RuntimeError(
-            "Logged in but failed to get access token from /api/auth/session.\n"
-            "The session may not have been fully established — try again."
+            f"Cookie {_BEATPORT_SESSION_COOKIE_NAME!r} not found in the browser's "
+            "Beatport store. Make sure you're logged into beatport.com."
         )
-
-    try:
-        from dotenv import dotenv_values
-        env_path = __import__("pathlib").Path(__file__).resolve().parent.parent / ".env"
-        current = dotenv_values(str(env_path)).get("BEATPORT_SESSION_TOKEN") or session_cookie
-    except Exception:
-        current = session_cookie
-    return access_token, current
+    return session, cf_clear
 
 
 def _jwt_payload(token: str) -> dict:
@@ -405,8 +112,8 @@ def refresh_via_session(session_cookie: str, *, verbose: bool = False) -> Option
     if r.status_code != 200:
         _why(f"HTTP {r.status_code}: {(r.text or '')[:200]!r}")
         if r.status_code == 403 and not cf_clear:
-            _why("403 with no cf_clearance in env — run `dj login-beatport --cdp` "
-                 "to pull a fresh cf_clearance from Brave.")
+            _why("403 with no cf_clearance in env — log into beatport.com in your "
+                 "default browser so the auto-resolve cascade can read a fresh one.")
         return None
 
     try:
@@ -419,7 +126,7 @@ def refresh_via_session(session_cookie: str, *, verbose: bool = False) -> Option
     err = token_data.get("error")
     if err:
         _why(f"NextAuth returned token.error={err!r} — server-side refresh chain is broken. "
-             f"Re-run `dj login-beatport --brave`.")
+             "Sign out and back into beatport.com in your default browser.")
         return None
 
     new_token = token_data.get("accessToken")
@@ -483,6 +190,65 @@ def save_cf_clearance_to_env(cf_clearance: str) -> None:
         # Also reflect into the running process so the very next refresh uses it.
         import os as _os
         _os.environ["BEATPORT_CF_CLEARANCE"] = cf_clearance
+
+
+def resolve_access_token(
+    *, force_refresh: bool = False, verbose: bool = False
+) -> Optional[str]:
+    """Return a valid 'Bearer <token>' or None.
+
+    Cascade:
+      1. BEATPORT_ACCESS_TOKEN env var (skipped if force_refresh)
+      2. BEATPORT_SESSION_TOKEN cookie → refresh_via_session
+      3. Browser cookie store → refresh_via_session
+         (default browser per connections.cookies.DEFAULT_BROWSER)
+
+    Persists any refreshed token (and rotated session/cf cookies) to .env.
+    Use force_refresh=True from on_401 handlers so a server-side invalidation
+    of an otherwise-unexpired JWT doesn't loop.
+    """
+    import os as _os
+    import time as _time
+
+    if not force_refresh:
+        access_token = _os.environ.get("BEATPORT_ACCESS_TOKEN", "").strip()
+        if access_token:
+            if not access_token.startswith("Bearer "):
+                access_token = f"Bearer {access_token}"
+            if _jwt_payload(access_token).get("exp", 0) > _time.time():
+                return access_token
+
+    session_cookie = _os.environ.get("BEATPORT_SESSION_TOKEN", "").strip()
+    if not session_cookie:
+        try:
+            from dotenv import dotenv_values
+            session_cookie = (
+                dotenv_values(".env").get("BEATPORT_SESSION_TOKEN", "") or ""
+            ).strip()
+        except Exception:
+            pass
+    if session_cookie:
+        bearer = refresh_via_session(session_cookie, verbose=verbose)
+        if bearer:
+            return bearer
+
+    try:
+        browser_session, browser_cf = _read_beatport_cookies_from_browser()
+    except RuntimeError:
+        return None
+    # Always persist fresh cf_clearance before retrying — this is the common fix
+    # for a Cloudflare 403 that blocked step 2 even with a valid session cookie.
+    if browser_cf and browser_cf != _os.environ.get("BEATPORT_CF_CLEARANCE", "").strip():
+        save_cf_clearance_to_env(browser_cf)
+    if browser_session:
+        # Retry even if browser_session == session_cookie: the newly-saved
+        # cf_clearance may now unblock a refresh that 403'd in step 2.
+        bearer = refresh_via_session(browser_session, verbose=verbose)
+        if bearer:
+            if browser_session != session_cookie:
+                save_session_cookie_to_env(browser_session)
+            return bearer
+    return None
 
 
 def make_client(token: str) -> httpx.Client:
