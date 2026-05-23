@@ -80,8 +80,6 @@ Each enrichment stage is idempotent. `enriched_tracks_analysis` carries per-stag
 
 ```
 dj
-├── login-beatport [--brave | --cookie]                Refresh Beatport tokens
-
 ├── sync                                               Stage 1: Apple Music → Beatport
 │   └── music-beatport
 │       ├── check-connections
@@ -135,17 +133,15 @@ dj
 
 ---
 
-## login-beatport
+## Beatport auth
 
-Stages 1, 3, and 4 talk to Beatport. They need `BEATPORT_ACCESS_TOKEN` and `BEATPORT_SESSION_TOKEN` in `.env`. Run this once to bootstrap; after that the token auto-refreshes.
+Stages 1, 3, and 4 talk to Beatport. Auth is handled transparently by `connections/beatport.resolve_access_token`:
 
-```bash
-uv run dj_cli.py login-beatport          # auto: tries env session cookie, then Brave's cookie store
-uv run dj_cli.py login-beatport --brave  # force-read session cookie from Brave's local store
-uv run dj_cli.py login-beatport --cookie # refresh via BEATPORT_SESSION_TOKEN only
-```
+1. `BEATPORT_ACCESS_TOKEN` in `.env` (used if still valid)
+2. `BEATPORT_SESSION_TOKEN` cookie in `.env` → refresh via Beatport's `/api/auth/session`
+3. Browser cookie store (Brave by default, see `connections/cookies.py`) → same refresh
 
-**How `--brave` works:** reads the `__Secure-next-auth.session-token` and `cf_clearance` cookies directly from Brave's on-disk cookie store via `browser-cookie3`, persists `cf_clearance` to `.env`, then calls Beatport's `/api/auth/session` to mint a fresh access token. No browser window opens. Requires you to be logged into beatport.com in Brave. If Beatport returns `RefreshAccessTokenError`, sign out and back in on beatport.com to rotate the NextAuth session.
+To bootstrap, sign into beatport.com in your default browser — every Beatport call refreshes the access token as needed and persists rotations back to `.env` (including a fresh `cf_clearance`). If Beatport returns `RefreshAccessTokenError`, sign out and back in on beatport.com to rotate the NextAuth session.
 
 **Token lifetime:** `BEATPORT_ACCESS_TOKEN` expires in ~10 min. `BEATPORT_SESSION_TOKEN` lasts ~32 days. As long as the session token is valid, all stages auto-refresh the access token.
 
@@ -576,18 +572,12 @@ SPOTIFY_CLIENT_SECRET    Spotify app client secret
 SOUNDCLOUD_CLIENT_ID     SoundCloud app client ID (for detect soundcloud + detect gems)
 SOUNDCLOUD_CLIENT_SECRET SoundCloud app client secret
 SOUNDCLOUD_REDIRECT_URI  OAuth callback URL (for detect login-soundcloud)
-
-# Optional — only needed for headless browser login
-BEATPORT_USERNAME        Beatport email
-BEATPORT_PASSWORD        Beatport password
 ```
 
-Get Beatport tokens manually if needed:
+Beatport auth runs from your default browser's cookie store — no env vars to set. Just sign into beatport.com once. If you need to seed the tokens manually:
 1. Open `beatport.com` in a browser (logged in)
 2. DevTools → Network → find `/api/auth/session` → response JSON → copy `token.accessToken` → `BEATPORT_ACCESS_TOKEN`
 3. DevTools → Application → Cookies → copy `__Secure-next-auth.session-token` (~3 KB value) → `BEATPORT_SESSION_TOKEN`
-
-Or log into beatport.com in Brave and run `dj login-beatport --brave` — it reads the cookies and refreshes the token automatically.
 
 ---
 
@@ -876,7 +866,7 @@ uv run pytest
 ## Package layout
 
 ```
-dj_cli.py                       CLI entrypoint — detect / sync / playlist / login-beatport
+dj_cli.py                       CLI entrypoint — detect / sync / playlist / course / vj
 
 connections/                    Transport layer — no app-specific dependencies
   beatport.py                   Beatport HTTP client + Playwright session token capture
