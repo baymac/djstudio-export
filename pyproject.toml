@@ -15,6 +15,7 @@ dependencies = [
     "mutagen>=1.47",
     "cryptography>=42",
     "psutil>=5.9",
+    "browser-cookie3>=0.20",
     # sync
     "playwright>=1.58",
     "playwright-stealth>=1.0",

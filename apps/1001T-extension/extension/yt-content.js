@@ -108,10 +108,16 @@ async function enterPiP() {
              top:52%; left:50%; transform:translate(-50%,-50%); pointer-events:none; }
 
     /* bottom controls row */
-    #ctrl-bot { flex:0 0 auto; padding:0 3vw 3vw;
+    #ctrl-bot { flex:0 0 auto; padding:0 3vw 7vw;
                 background:linear-gradient(to top, rgba(0,0,0,.75) 0%, transparent 100%);
                 display:flex; flex-direction:column; gap:2vw; }
-    #time { color:#d0d0d0; font-size:2.8vw; line-height:1; font-variant-numeric:tabular-nums; }
+
+    /* always-visible time readout (sibling of overlay) */
+    #time { position:absolute; right:3vw; bottom:2vw; z-index:2;
+            color:#fff; font-size:2.8vw; line-height:1;
+            font-variant-numeric:tabular-nums;
+            text-shadow:0 1px 3px rgba(0,0,0,.95), 0 0 6px rgba(0,0,0,.7);
+            pointer-events:none; }
 
     /* range slider */
     #track { -webkit-appearance:none; appearance:none; width:100%; height:4px;
@@ -191,13 +197,13 @@ async function enterPiP() {
   track.type = 'range'; track.id = 'track'; track.min = '0'; track.max = '1000'; track.step = '1'; track.value = '0';
   const time  = pipWin.document.createElement('div'); time.id = 'time'; time.textContent = '0:00 / 0:00';
   ctrlBot.appendChild(track);
-  ctrlBot.appendChild(time);
 
   overlay.appendChild(ctrlMid);
   overlay.appendChild(ctrlBot);
 
   vwrap.appendChild(video);
   vwrap.appendChild(overlay);
+  vwrap.appendChild(time);
 
   // ── Tracklist ─────────────────────────────────────────────────────────────
   const tlist = pipWin.document.createElement('div'); tlist.id = 'tlist';

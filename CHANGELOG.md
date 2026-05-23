@@ -2,6 +2,21 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.2.0] - 2026-05-23
+
+### Added
+- **Multi-browser cookie reader** (`connections/cookies.py`) — replaces Brave-only `brave_cookies.py`; wraps `browser_cookie3` for Brave, Chrome, Chromium, Edge, Opera, Vivaldi, Firefox, and Safari; two helpers: `read_cookies_for_domain` (Playwright-shaped dicts) and `load_cookie_jar` (httpx/requests CookieJar)
+- **1001tracklists auto-fetch** (`detect/tracklists1001_api.py`) — POSTs to `export_data.php` using browser cookies instead of requiring vi-paste; supports `--browser {brave,chrome,safari,firefox}` flag with automatic fallback to vi-paste on failure
+- `--paste` flag on `detect 1001tracklists` to force legacy vi editor flow
+- `browser-cookie3` dependency
+
+### Changed
+- `detect 1001tracklists` now auto-fetches via Brave cookies by default; falls back to vi-paste on any error
+- `connections/beatport.py` and `connections/soundcloud_browser.py` updated to import from `connections.cookies` instead of the removed `brave_cookies`
+
+### Removed
+- `connections/brave_cookies.py` — superseded by `connections/cookies.py`
+
 ## [0.1.1.0] - 2026-05-17
 
 ### Added
