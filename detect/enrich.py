@@ -50,9 +50,8 @@ def _get_token() -> str:
         return token
     console.print(
         "[red]Beatport token expired and session refresh failed.[/red]\n"
-        "Tried env session cookie and Brave's cookie store. "
-        "Log into beatport.com in Brave, or run "
-        "[bold]dj login-beatport --ui[/bold] to log in interactively."
+        "Tried env session cookie and the browser cookie store. "
+        "Log into beatport.com in your default browser, then re-run."
     )
     sys.exit(1)
 
@@ -212,8 +211,7 @@ def run_enrich(
                 progress.stop()
                 console.print(
                     "\n[red]Auth failed:[/red] Beatport session refresh failed after retrying.\n"
-                    "Run [bold]dj login-beatport --brave[/bold] to grab a fresh session from Brave,\n"
-                    "or [bold]dj login-beatport --ui[/bold] to log in interactively."
+                    "Log into beatport.com in your default browser, then re-run."
                 )
                 http_client.close()
                 sys.exit(1)
