@@ -1,10 +1,20 @@
 """SQLite persistence for track detection — all data in the unified dj.db."""
 from __future__ import annotations
 
+import re as _re
 import sqlite3
 from datetime import datetime, timezone
 
 from paths import DB_PATH
+
+# Tracks where artist or title is literally "ID" (DJ shorthand for "I don't know
+# this track") are stored but never fuzzy-matched on Beatport — marked 'secret'.
+_SECRET_ID_RE = _re.compile(r"^ID$", _re.IGNORECASE)
+
+
+def _is_id_placeholder(text: str | None) -> bool:
+    """True when text is exactly 'ID' (case-insensitive) — an unknown-track sentinel."""
+    return bool(text and _SECRET_ID_RE.match(text.strip()))
 
 
 def _connect() -> sqlite3.Connection:
@@ -613,13 +623,14 @@ def insert_track(
         if existing:
             track_id = existing["id"]
         else:
+            outcome = "secret" if (_is_id_placeholder(artist) or _is_id_placeholder(title)) else None
             cur = con.execute(
                 """INSERT INTO detected_tracks
-                   (artist, title, shazam_key, apple_music_id, apple_music_url, source, synced_at)
-                   VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                   (artist, title, shazam_key, apple_music_id, apple_music_url, source, synced_at, enrich_outcome)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
                 (artist, title, shazam_key,
                  track.get("apple_music_id"), track.get("apple_music_url"),
-                 source, _now()),
+                 source, _now(), outcome),
             )
             track_id = cur.lastrowid
 
@@ -866,6 +877,24 @@ def mark_enrich_miss(detected_track_id: int, outcome: str) -> None:
             "UPDATE detected_tracks SET enrich_outcome = ? WHERE id = ?",
             (outcome, detected_track_id),
         )
+
+
+def mark_enrich_secret(detected_track_id: int) -> None:
+    """Mark a track as a secret/ID placeholder — skip fuzzy matching."""
+    with _connect() as con:
+        con.execute(
+            "UPDATE detected_tracks SET enrich_outcome = 'secret' WHERE id = ?",
+            (detected_track_id,),
+        )
+
+
+def count_secret_tracks() -> int:
+    """Count detected tracks that are ID placeholders (enrich_outcome='secret')."""
+    with _connect() as con:
+        row = con.execute(
+            "SELECT COUNT(*) FROM detected_tracks WHERE enrich_outcome = 'secret'"
+        ).fetchone()
+        return row[0] if row else 0
 
 
 def start_enrich_run() -> int:

@@ -350,3 +350,73 @@ def test_upsert_analysis_handles_all_none_fields(tmp_db):
     # Re-running with still-empty data is also a no-op (DO NOTHING path).
     db.upsert_analysis(10, {})
     db.upsert_analysis(10, {"mik_key": None})
+
+
+# ── Secret / ID-placeholder tracks ───────────────────────────────────────────
+
+
+def test_insert_track_marks_id_title_as_secret(tmp_db):
+    sid = db.create_session("1001tracklists", "https://1001tracklists.com/x", "Mix")
+    tid = db.insert_track({"artist": "Mathame", "title": "ID"}, source="1001tracklists", session_id=sid)
+    import sqlite3 as _sql
+    con = _sql.connect(tmp_db)
+    row = con.execute("SELECT enrich_outcome FROM detected_tracks WHERE id = ?", (tid,)).fetchone()
+    con.close()
+    assert row[0] == "secret"
+
+
+def test_insert_track_marks_id_artist_as_secret(tmp_db):
+    sid = db.create_session("youtube", "https://yt.com/v=id", "Mix")
+    tid = db.insert_track({"artist": "ID", "title": "Some Title"}, source="youtube", session_id=sid)
+    import sqlite3 as _sql
+    con = _sql.connect(tmp_db)
+    row = con.execute("SELECT enrich_outcome FROM detected_tracks WHERE id = ?", (tid,)).fetchone()
+    con.close()
+    assert row[0] == "secret"
+
+
+def test_insert_track_case_insensitive_id(tmp_db):
+    sid = db.create_session("youtube", "https://yt.com/v=ci", "Mix")
+    tid = db.insert_track({"artist": "Artist", "title": "id"}, source="youtube", session_id=sid)
+    import sqlite3 as _sql
+    con = _sql.connect(tmp_db)
+    row = con.execute("SELECT enrich_outcome FROM detected_tracks WHERE id = ?", (tid,)).fetchone()
+    con.close()
+    assert row[0] == "secret"
+
+
+def test_insert_track_partial_id_not_secret(tmp_db):
+    """'My ID' or 'Identify' in title must NOT be marked secret — exact match only."""
+    sid = db.create_session("youtube", "https://yt.com/v=pid", "Mix")
+    tid = db.insert_track({"artist": "Artist", "title": "My ID"}, source="youtube", session_id=sid)
+    import sqlite3 as _sql
+    con = _sql.connect(tmp_db)
+    row = con.execute("SELECT enrich_outcome FROM detected_tracks WHERE id = ?", (tid,)).fetchone()
+    con.close()
+    assert row[0] is None
+
+
+def test_get_unenriched_tracks_excludes_secret(tmp_db):
+    sid = db.create_session("1001tracklists", "https://1001tracklists.com/y", "Mix")
+    db.insert_track({"artist": "Mathame", "title": "ID"}, source="1001tracklists", session_id=sid)
+    db.insert_track({"artist": "Bicep", "title": "Glue"}, source="1001tracklists", session_id=sid)
+    tracks = db.get_unenriched_tracks()
+    assert len(tracks) == 1
+    assert tracks[0]["title"] == "Glue"
+
+
+def test_count_secret_tracks(tmp_db):
+    sid = db.create_session("1001tracklists", "https://1001tracklists.com/z", "Mix")
+    db.insert_track({"artist": "Mathame", "title": "ID"}, source="1001tracklists", session_id=sid)
+    db.insert_track({"artist": "Mathame & Slander", "title": "ID"}, source="1001tracklists", session_id=sid)
+    db.insert_track({"artist": "Bicep", "title": "Glue"}, source="1001tracklists", session_id=sid)
+    assert db.count_secret_tracks() == 2
+
+
+def test_mark_enrich_secret(tmp_db):
+    sid = db.create_session("youtube", "https://yt.com/v=mes", "Mix")
+    tid = db.insert_track({"artist": "Known", "title": "Track"}, source="youtube", session_id=sid)
+    db.mark_enrich_secret(tid)
+    assert db.count_secret_tracks() == 1
+    tracks = db.get_unenriched_tracks()
+    assert not any(t["id"] == tid for t in tracks)

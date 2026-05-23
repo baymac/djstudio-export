@@ -105,10 +105,16 @@ def run_enrich(
         tracks = tracks[:limit]
 
     if not tracks:
-        console.print("Nothing to enrich — all detected tracks already have Beatport data.")
+        secret_n = detect_db.count_secret_tracks()
+        msg = "Nothing to enrich — all detected tracks already have Beatport data."
+        if secret_n:
+            msg += f" ({secret_n} secret/ID-placeholder tracks skipped)"
+        console.print(msg)
         return
 
-    console.print(f"[bold]{len(tracks)}[/bold] tracks to enrich")
+    secret_n = detect_db.count_secret_tracks()
+    secret_note = f"  [dim]({secret_n} secret/ID-placeholder tracks skipped)[/dim]" if secret_n else ""
+    console.print(f"[bold]{len(tracks)}[/bold] tracks to enrich{secret_note}")
 
     token = _get_token()
     http_client = bp_api.make_client(token)
