@@ -2,7 +2,8 @@
 import Meyda from 'meyda';
 
 export function createAudio() {
-  let ctx, source, analyser, freqData, timeData;
+  let ctx, source, analyser, highpass, compressor, freqData, timeData;
+  let demoNode = null;
   let meydaAnalyzer = null;
   let aubioTempo = null;
 
@@ -53,37 +54,133 @@ export function createAudio() {
     };
     if (deviceId) constraints.deviceId = { exact: deviceId };
     const stream = await navigator.mediaDevices.getUserMedia({ audio: constraints });
+    stopDemo();
     source = ctx.createMediaStreamSource(stream);
-    setupAnalyser();
+    _buildGraph();
+    source.connect(highpass);
     await setupAubio();
     setupMeyda();
   }
 
-  function setupAnalyser() {
+  function _buildGraph() {
     analyser = ctx.createAnalyser();
     analyser.fftSize = 4096;
     analyser.smoothingTimeConstant = 0.0;
     analyser.minDecibels = -90;
     analyser.maxDecibels = -10;
 
-    const highpass = ctx.createBiquadFilter();
+    highpass = ctx.createBiquadFilter();
     highpass.type = 'highpass';
     highpass.frequency.value = 35;
     highpass.Q.value = 0.7;
 
-    const compressor = ctx.createDynamicsCompressor();
+    compressor = ctx.createDynamicsCompressor();
     compressor.threshold.value = -24;
     compressor.knee.value = 24;
     compressor.ratio.value = 2.5;
     compressor.attack.value = 0.004;
     compressor.release.value = 0.18;
 
-    source.connect(highpass);
     highpass.connect(compressor);
     compressor.connect(analyser);
 
     freqData = new Uint8Array(analyser.frequencyBinCount);
     timeData = new Uint8Array(analyser.fftSize);
+  }
+
+  async function startDemo() {
+    if (!ctx) {
+      ctx = new (window.AudioContext || window.webkitAudioContext)();
+      _buildGraph();
+      await setupAubio();
+      setupMeyda();
+    } else if (ctx.state === 'suspended') {
+      await ctx.resume();
+    }
+    stopDemo();
+    // Demo overrides mic visually: disconnect the mic source so the analyser
+    // only sees the demo signal. Reconnected in stopDemo().
+    if (source) { try { source.disconnect(highpass); } catch (_) {} }
+    const buf = _generateDemoBeat(ctx);
+    demoNode = ctx.createBufferSource();
+    demoNode.buffer = buf;
+    demoNode.loop = true;
+    demoNode.connect(highpass);
+    demoNode.connect(ctx.destination);
+    demoNode.start(0);
+  }
+
+  function stopDemo() {
+    if (!demoNode) return;
+    try { demoNode.stop(); } catch (_) {}
+    try { demoNode.disconnect(); } catch (_) {}
+    demoNode = null;
+    // Restore mic routing.
+    if (source && highpass) { try { source.connect(highpass); } catch (_) {} }
+  }
+
+  function isDemoActive() { return demoNode !== null; }
+
+  function _generateDemoBeat(actx, bpm = 140, bars = 4) {
+    const beatDur = 60 / bpm;
+    const sr = actx.sampleRate;
+    const n = Math.ceil(beatDur * 4 * bars * sr);
+    const buf = actx.createBuffer(1, n, sr);
+    const out = buf.getChannelData(0);
+
+    function kick(t0) {
+      const s0 = Math.round(t0 * sr);
+      const sn = Math.min(Math.round(0.28 * sr), n - s0);
+      let phase = 0;
+      for (let i = 0; i < sn; i++) {
+        const t = i / sr;
+        const freq = 140 * Math.exp(-t * 14) + 50;
+        phase += (2 * Math.PI * freq) / sr;
+        out[s0 + i] += Math.sin(phase) * Math.exp(-t * 14) * 0.85;
+        if (i < Math.round(0.006 * sr))
+          out[s0 + i] += (Math.random() * 2 - 1) * 0.3 * (1 - i / Math.round(0.006 * sr));
+      }
+    }
+
+    function snare(t0) {
+      const s0 = Math.round(t0 * sr);
+      const sn = Math.min(Math.round(0.13 * sr), n - s0);
+      let hp = 0;
+      for (let i = 0; i < sn; i++) {
+        const t = i / sr;
+        const noise = Math.random() * 2 - 1;
+        hp = noise - hp * 0.75;
+        const env = Math.exp(-t * 22);
+        out[s0 + i] += noise * env * 0.5 + hp * env * 0.28 + Math.sin(2 * Math.PI * 210 * t) * env * 0.18;
+      }
+    }
+
+    function hihat(t0) {
+      const s0 = Math.round(t0 * sr);
+      const sn = Math.min(Math.round(0.028 * sr), n - s0);
+      let hp = 0;
+      for (let i = 0; i < sn; i++) {
+        const noise = Math.random() * 2 - 1;
+        hp = noise - hp * 0.88;
+        out[s0 + i] += hp * Math.exp(-(i / sr) * 130) * 0.2;
+      }
+    }
+
+    for (let bar = 0; bar < bars; bar++) {
+      const t = bar * 4 * beatDur;
+      for (let b = 0; b < 4; b++) {
+        kick(t + b * beatDur);
+        if (b === 1 || b === 3) snare(t + b * beatDur);
+        hihat(t + b * beatDur);
+        hihat(t + b * beatDur + beatDur / 2);
+      }
+    }
+
+    let peak = 0;
+    for (let i = 0; i < n; i++) if (Math.abs(out[i]) > peak) peak = Math.abs(out[i]);
+    if (peak > 0.01) { const s = 0.85 / peak; for (let i = 0; i < n; i++) out[i] *= s; }
+
+    return buf;
   }
 
   async function setupAubio() {
@@ -278,5 +375,5 @@ export function createAudio() {
     if (ctx && ctx.state === 'suspended') ctx.resume();
   }
 
-  return { init, tick, resume, features };
+  return { init, tick, resume, startDemo, stopDemo, isDemoActive, features };
 }

@@ -3,6 +3,7 @@ export function createUI(audio) {
   let pickerOpen   = false;
   let flashTimer   = null;
   let debugVisible = false;
+  let shortcutsOpen = false;
 
   // ── Setup screen ──────────────────────────────────────────────────────────
   function setStatus(msg, isError) {
@@ -93,6 +94,53 @@ export function createUI(audio) {
     e.stopPropagation();
     togglePicker();
   });
+
+  // ── Shortcuts panel (with demo toggle inside) ────────────────────────────
+  const shortcutsBtn   = document.getElementById('shortcuts-btn');
+  const shortcutsPanel = document.getElementById('shortcuts-panel');
+  const demoToggle     = document.getElementById('demo-toggle');
+  const demoKbd        = document.getElementById('demo-kbd');
+
+  function closeShortcuts() {
+    shortcutsOpen = false;
+    if (shortcutsPanel) shortcutsPanel.style.display = 'none';
+    shortcutsBtn?.classList.remove('open');
+  }
+
+  function updateDemoToggleVisual() {
+    const on = audio.isDemoActive();
+    demoToggle?.classList.toggle('active', on);
+    if (demoKbd) demoKbd.textContent = on ? '■' : '▶';
+    shortcutsBtn?.classList.toggle('demo-on', on);
+  }
+
+  shortcutsBtn?.addEventListener('click', e => {
+    e.stopPropagation();
+    shortcutsOpen = !shortcutsOpen;
+    if (shortcutsPanel) shortcutsPanel.style.display = shortcutsOpen ? 'block' : 'none';
+    shortcutsBtn.classList.toggle('open', shortcutsOpen);
+  });
+
+  // Clicks inside the panel shouldn't close it.
+  shortcutsPanel?.addEventListener('click', e => e.stopPropagation());
+
+  demoToggle?.addEventListener('click', async () => {
+    if (audio.isDemoActive()) {
+      audio.stopDemo();
+      updateDemoToggleVisual();
+      return;
+    }
+    try {
+      await audio.startDemo();
+      dismissSetup();
+      updateDemoToggleVisual();
+    } catch (err) {
+      setStatus('demo error: ' + err.message, true);
+    }
+  });
+
+  document.addEventListener('click', closeShortcuts);
+  document.addEventListener('keydown', e => { if (e.key === 'Escape') closeShortcuts(); });
 
   // ── Scene-name flash ──────────────────────────────────────────────────────
   function flashSceneName(name) {
