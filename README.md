@@ -26,6 +26,8 @@ uv sync
 uv run playwright install chromium   # needed for Beatport browser login
 ```
 
+Node.js (v18+) and npm are required for `dj vj cats start` and `dj course start`. Install via [nodejs.org](https://nodejs.org) or your package manager (`brew install node`). The first `start` run auto-installs npm dependencies.
+
 Copy `.env.example` to `.env` and fill in credentials before using `detect` or `sync`.
 
 Rekordbox must be **closed** before any rekordbox write (`detect export-to-rekordbox`, `detect import-rekordbox-analysis`, `playlist rekordbox`).
