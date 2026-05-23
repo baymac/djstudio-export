@@ -940,6 +940,10 @@ helpers/                        Standalone maintenance scripts + course tools
 
 ---
 
+## Blog
+
+- [How dj detect enrich works](https://www.baymac.lol/posts/dj-detect-enrich) — deep-dive into the Beatport fuzzy-matching + enrichment pipeline (Stages 2–3)
+
 ## Credits
 
 **Built by [baymac](https://github.com/baymac) for JAKE FURY**

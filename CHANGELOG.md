@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.3.2] - 2026-05-23
+
+### Added
+- **`vj/cats` live demo** — deployed to [cats-two-gold.vercel.app](https://cats-two-gold.vercel.app); README updated with live demo link and `.vercel` added to `.gitignore`
+- **Blog link in README** — added `## Blog` section linking to the [dj detect enrich deep-dive](https://www.baymac.lol/posts/dj-detect-enrich) post
+
 ## [0.1.3.1] - 2026-05-23
 
 ### Changed

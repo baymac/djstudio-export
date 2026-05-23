@@ -4,7 +4,7 @@ An audio-reactive VJ visualizer built around a DJ's cats — procedural cat pose
 
 Tap, allow mic, play music. The show cycles through four sections forever.
 
-Ships as a sub-project of the [`dj`](../../README.md) repo at `vj/cats/`. Runs locally only — there's no hosted deploy.
+Ships as a sub-project of the [`dj`](../../README.md) repo at `vj/cats/`. **Live demo: [cats-two-gold.vercel.app](https://cats-two-gold.vercel.app)**
 
 ---
 
