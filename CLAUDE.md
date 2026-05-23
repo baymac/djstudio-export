@@ -71,7 +71,7 @@ tests/                          pytest
 ```bash
 # Setup
 uv sync
-uv run playwright install chromium
+uv run playwright install chromium  # needed for SoundCloud browser fetch + helpers/download_course.py
 
 # Tests
 uv run pytest

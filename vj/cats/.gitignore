@@ -7,3 +7,4 @@ dist/
 # Un-ignore — parent repo's .gitignore matches *.json
 !package.json
 !package-lock.json
+.vercel
