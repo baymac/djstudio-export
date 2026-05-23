@@ -236,12 +236,17 @@ def resolve_access_token(
         browser_session, browser_cf = _read_beatport_cookies_from_browser()
     except RuntimeError:
         return None
+    # Always persist fresh cf_clearance before retrying — this is the common fix
+    # for a Cloudflare 403 that blocked step 2 even with a valid session cookie.
     if browser_cf and browser_cf != _os.environ.get("BEATPORT_CF_CLEARANCE", "").strip():
         save_cf_clearance_to_env(browser_cf)
-    if browser_session and browser_session != session_cookie:
+    if browser_session:
+        # Retry even if browser_session == session_cookie: the newly-saved
+        # cf_clearance may now unblock a refresh that 403'd in step 2.
         bearer = refresh_via_session(browser_session, verbose=verbose)
         if bearer:
-            save_session_cookie_to_env(browser_session)
+            if browser_session != session_cookie:
+                save_session_cookie_to_env(browser_session)
             return bearer
     return None
 
