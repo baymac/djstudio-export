@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Show</title>
+  <link rel="stylesheet" href="/src/styles.css">
+  <!-- aubio is WebAssembly — keep as CDN, hard to bundle -->
+  <script src="https://cdn.jsdelivr.net/npm/aubiojs@0.1.1/build/aubio.js"></script>
+  <!-- Keep canvas invisible + pre-apply rotation before any paint.
+       id="prerot" lets setup() remove the !important opacity lock after rotation is applied. -->
+  <script>(function(){var r=parseInt(new URLSearchParams(location.search).get('rot')||'0',10);var s=document.createElement('style');s.id='prerot';var rot=[90,-90,180].includes(r)?'position:fixed!important;top:50%!important;left:50%!important;transform:translate(-50%,-50%) rotate('+r+'deg);':'';s.textContent='canvas{opacity:0!important;'+rot+'}';document.head.appendChild(s);})()</script>
+</head>
+<body>
+
+<div id="setup" style="display:none">
+  <div id="tap-hint">TAP TO START</div>
+  <div id="setup-status"></div>
+  <button id="toggle-picker">pick audio device</button>
+  <div id="device-list" style="display:none"></div>
+</div>
+
+
+<div id="debug">
+  <div class="bar-wrap">
+    <div class="db-label">BASS</div>
+    <div class="bar-bg"><div class="bar-fill" id="bar-bass" style="width:0%"></div></div>
+  </div>
+  <div class="bar-wrap">
+    <div class="db-label">MID</div>
+    <div class="bar-bg"><div class="bar-fill" id="bar-mid" style="width:0%;background:#44aaff"></div></div>
+  </div>
+  <div class="bar-wrap">
+    <div class="db-label">HIGH</div>
+    <div class="bar-bg"><div class="bar-fill" id="bar-high" style="width:0%;background:#44ffaa"></div></div>
+  </div>
+  <div><div class="db-label">STATE</div>    <div class="db-val" id="val-state">--</div></div>
+  <div><div class="db-label">ENERGY</div>   <div class="db-val" id="val-energy">--</div></div>
+  <div><div class="db-label">ANIM</div>     <div class="db-val" id="val-anim-left">--</div></div>
+  <div><div class="db-label">SECTION</div>  <div class="db-val" id="val-section">--</div></div>
+  <div><div class="db-label">SEC LEFT</div> <div class="db-val" id="val-sec-left">--</div></div>
+</div>
+
+<div id="duet-labels">
+  <div id="lbl-mewtwo">MEWTWO</div>
+  <div id="lbl-chewtwo">CHEWTWO</div>
+</div>
+
+<div id="rest-screen">
+  <img id="rest-logo" src="/dj_text_logo.png" alt="JAKE FURY">
+  <img id="rest-cat"  src="/cat_jake_fury_big.jpg" alt="DJ Cat">
+</div>
+
+<script type="module" src="/src/js/main.js"></script>
+</body>
+</html>
