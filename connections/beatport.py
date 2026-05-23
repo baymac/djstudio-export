@@ -303,7 +303,7 @@ def capture_session_from_brave() -> str:
     Raises RuntimeError if Brave isn't installed, you're not logged into Beatport,
     or the macOS Keychain decryption fails.
     """
-    from connections.brave_cookies import read_cookies_for_domain
+    from connections.cookies import read_cookies_for_domain
     cookies = read_cookies_for_domain("beatport.com")
     for c in cookies:
         if c["name"] == _BEATPORT_SESSION_COOKIE_NAME:
@@ -483,6 +483,57 @@ def save_cf_clearance_to_env(cf_clearance: str) -> None:
         # Also reflect into the running process so the very next refresh uses it.
         import os as _os
         _os.environ["BEATPORT_CF_CLEARANCE"] = cf_clearance
+
+
+def resolve_access_token(
+    *, force_refresh: bool = False, verbose: bool = False
+) -> Optional[str]:
+    """Return a valid 'Bearer <token>' or None.
+
+    Cascade matches `dj login-beatport` auto mode:
+      1. BEATPORT_ACCESS_TOKEN env var (skipped if force_refresh)
+      2. BEATPORT_SESSION_TOKEN cookie → refresh_via_session
+      3. Brave cookie store → refresh_via_session
+
+    Persists any refreshed token (and rotated session/cf cookies) to .env.
+    Use force_refresh=True from on_401 handlers so a server-side invalidation
+    of an otherwise-unexpired JWT doesn't loop.
+    """
+    import os as _os
+    import time as _time
+
+    if not force_refresh:
+        access_token = _os.environ.get("BEATPORT_ACCESS_TOKEN", "").strip()
+        if access_token:
+            if not access_token.startswith("Bearer "):
+                access_token = f"Bearer {access_token}"
+            if _jwt_payload(access_token).get("exp", 0) > _time.time():
+                return access_token
+
+    session_cookie = _os.environ.get("BEATPORT_SESSION_TOKEN", "").strip()
+    if not session_cookie:
+        try:
+            from dotenv import dotenv_values
+            session_cookie = (
+                dotenv_values(".env").get("BEATPORT_SESSION_TOKEN", "") or ""
+            ).strip()
+        except Exception:
+            pass
+    if session_cookie:
+        bearer = refresh_via_session(session_cookie, verbose=verbose)
+        if bearer:
+            return bearer
+
+    try:
+        brave_cookie = capture_session_from_brave()
+    except RuntimeError:
+        return None
+    if brave_cookie and brave_cookie != session_cookie:
+        bearer = refresh_via_session(brave_cookie, verbose=verbose)
+        if bearer:
+            save_session_cookie_to_env(brave_cookie)
+            return bearer
+    return None
 
 
 def make_client(token: str) -> httpx.Client:
