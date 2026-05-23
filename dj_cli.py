@@ -4,17 +4,16 @@
   dj detect ...          Detect tracks from Instagram/radio/Mixcloud/YouTube/Podbean
   dj sync ...            Sync Apple Music → Beatport playlists
   dj playlist ...        Push a SQL query of enriched tracks to Beatport / rekordbox / DJ Studio
-
-Beatport auth is handled transparently by connections/beatport.resolve_access_token
-(env access token → env session cookie → browser cookie store). Sign into beatport.com
-in your default browser (see connections/cookies.py); commands will refresh as needed.
+  dj login-beatport ...  Refresh Beatport tokens
 
 Run `uv run dj_cli.py <command> --help` for details.
 """
 
 import argparse
+import sys
 import warnings
 from pathlib import Path
+from typing import Optional
 
 warnings.filterwarnings("ignore", message=".*audioop.*", category=DeprecationWarning)
 
@@ -25,6 +24,7 @@ from detect.cli import add_detect_subparser, dispatch as dispatch_detect
 from sync.cli import add_sync_subparser, dispatch as dispatch_sync
 from playlist.cli import add_playlist_subparser, dispatch as dispatch_playlist
 from apps.course.cli import run_start as course_start, run_stop as course_stop
+from vj.cli import run_start as vj_start, run_stop as vj_stop, list_apps as vj_list_apps
 
 
 def _build_parser():
@@ -56,11 +56,131 @@ Examples:
     course_sub.add_parser("start", help=f"Start the viewer and open https://course.localhost")
     course_sub.add_parser("stop", help="Stop the viewer")
 
-    return parser, detect_p, sync_p, playlist_p, course_p
+    vj_apps = vj_list_apps()
+    vj_help = f"Start/stop a VJ visualizer under vj/<name>/ (available: {', '.join(vj_apps) or 'none yet'})"
+    vj_p = sub.add_parser("vj", help=vj_help)
+    vj_p.add_argument("name", nargs="?", help="VJ app directory name under vj/")
+    vj_p.add_argument("action", nargs="?", choices=["start", "stop"], help="start or stop")
+
+    lb_p = sub.add_parser(
+        "login-beatport",
+        help="Fetch a fresh Beatport token and save it to .env",
+    )
+    mode = lb_p.add_mutually_exclusive_group()
+    mode.add_argument("--ui", action="store_true",
+                      help="Browser login with visible window (use if headless is blocked by Cloudflare)")
+    mode.add_argument("--cookie", action="store_true",
+                      help="Refresh via BEATPORT_SESSION_TOKEN cookie")
+    mode.add_argument("--cdp", action="store_true",
+                      help="Attach to running Brave via CDP (port 9222) and run the auth call from "
+                           "inside Brave itself — bypasses every Cloudflare fingerprint check. "
+                           "Requires Brave launched with --remote-debugging-port=9222.")
+    mode.add_argument("--brave", action="store_true",
+                      help="Read session cookie from Brave's local store (no browser window needed)")
+
+    return parser, detect_p, sync_p, playlist_p, lb_p, course_p, vj_p
+
+
+def _handle_login_beatport(args) -> None:
+    from connections import beatport as bp_api
+    from rich.console import Console
+    console = Console()
+
+    def _save_and_report(token: str, session: Optional[str] = None) -> None:
+        bp_api.save_token_to_env(token, session)
+        import os; os.environ["BEATPORT_ACCESS_TOKEN"] = token.removeprefix("Bearer ").strip()
+        extra = " + session cookie" if session else ""
+        console.print(f"[green]Token{extra} saved to .env[/green] — expires in ~10 min, session cookie will auto-refresh.")
+
+    if not args.ui and not args.cookie and not getattr(args, "brave", False):
+        import os, time as _t
+        current = os.environ.get("BEATPORT_ACCESS_TOKEN", "").strip()
+        if current:
+            if not current.startswith("Bearer "):
+                current = f"Bearer {current}"
+            remaining = int(bp_api._jwt_payload(current).get("exp", 0) - _t.time())
+            if remaining > 0:
+                console.print(f"[green]Token still valid[/green] — expires in {remaining}s. Use --brave, --cookie, or --ui to force refresh.")
+                return
+
+    if getattr(args, "brave", False):
+        try:
+            session_cookie = bp_api.capture_session_from_brave()
+        except RuntimeError as e:
+            console.print(f"[red]Brave cookie read failed:[/red] {e}")
+            sys.exit(1)
+        token = bp_api.refresh_via_session(session_cookie)
+        if not token:
+            console.print("[red]Session cookie refresh failed — try logging into Beatport in Brave first.[/red]")
+            sys.exit(1)
+        _save_and_report(token, session_cookie)
+        return
+
+    if args.cookie:
+        session_cookie = __import__("os").environ.get("BEATPORT_SESSION_TOKEN", "").strip()
+        if not session_cookie:
+            console.print("[red]BEATPORT_SESSION_TOKEN not set in .env[/red]")
+            sys.exit(1)
+        token = bp_api.refresh_via_session(session_cookie)
+        if not token:
+            console.print("[red]Session cookie refresh failed — cookie may be expired.[/red]")
+            sys.exit(1)
+        _save_and_report(token)
+        return
+
+    if args.cdp:
+        console.print("[dim]Connecting to running Brave via CDP (localhost:9222) and fetching access token from inside Brave…[/dim]")
+        try:
+            token = bp_api.capture_session_via_cdp()
+        except RuntimeError as e:
+            console.print(f"[red]CDP login failed:[/red] {e}")
+            sys.exit(1)
+        _save_and_report(token)
+        return
+
+    if args.ui:
+        console.print("[dim]Opening visible browser to grab Beatport session…[/dim]")
+        import os as _os
+        username = _os.environ.get("BEATPORT_USERNAME", "").strip() or None
+        password = _os.environ.get("BEATPORT_PASSWORD", "").strip() or None
+        try:
+            token, session = bp_api.capture_token(username, password, headless=False)
+        except RuntimeError as e:
+            console.print(f"[red]Login failed:[/red] {e}")
+            sys.exit(1)
+        _save_and_report(token, session)
+        return
+
+    # No flag — auto mode: try session cookie, then Brave store
+    import os as _os
+    session_cookie = _os.environ.get("BEATPORT_SESSION_TOKEN", "").strip()
+    if session_cookie:
+        token = bp_api.refresh_via_session(session_cookie)
+        if token:
+            _save_and_report(token)
+            return
+        console.print("[yellow]Session cookie refresh failed — trying Brave cookie store…[/yellow]")
+
+    try:
+        session_cookie = bp_api.capture_session_from_brave()
+        token = bp_api.refresh_via_session(session_cookie)
+        if token:
+            _save_and_report(token, session_cookie)
+            return
+        console.print("[red]Brave cookie found but refresh failed — it may be stale.[/red]")
+    except RuntimeError:
+        pass
+
+    console.print(
+        "[red]Could not get a valid Beatport token.[/red]\n"
+        "Log into beatport.com in Brave, then run [bold]dj login-beatport[/bold] again.\n"
+        "Or use [bold]dj login-beatport --ui[/bold] to log in with a browser window."
+    )
+    sys.exit(1)
 
 
 def main() -> None:
-    parser, detect_p, sync_p, playlist_p, course_p = _build_parser()
+    parser, detect_p, sync_p, playlist_p, lb_p, course_p, vj_p = _build_parser()
     args = parser.parse_args()
 
     if args.command == "detect":
@@ -76,6 +196,19 @@ def main() -> None:
             course_stop()
         else:
             course_p.print_help()
+    elif args.command == "vj":
+        if not args.name or not args.action:
+            vj_p.print_help()
+            apps = vj_list_apps()
+            if apps:
+                print(f"\nAvailable VJ apps: {', '.join(apps)}")
+            return
+        if args.action == "start":
+            vj_start(args.name)
+        else:
+            vj_stop(args.name)
+    elif args.command == "login-beatport":
+        _handle_login_beatport(args)
     else:
         parser.print_help()
 
