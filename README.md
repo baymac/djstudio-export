@@ -80,7 +80,7 @@ Each enrichment stage is idempotent. `enriched_tracks_analysis` carries per-stag
 
 ```
 dj
-├── login-beatport [--ui | --cookie]                   Refresh Beatport tokens
+├── login-beatport [--brave | --cookie]                Refresh Beatport tokens
 
 ├── sync                                               Stage 1: Apple Music → Beatport
 │   └── music-beatport
@@ -140,12 +140,12 @@ dj
 Stages 1, 3, and 4 talk to Beatport. They need `BEATPORT_ACCESS_TOKEN` and `BEATPORT_SESSION_TOKEN` in `.env`. Run this once to bootstrap; after that the token auto-refreshes.
 
 ```bash
-uv run dj_cli.py login-beatport          # auto: tries session cookie, then browser
-uv run dj_cli.py login-beatport --ui     # open a visible browser window to log in
+uv run dj_cli.py login-beatport          # auto: tries env session cookie, then Brave's cookie store
+uv run dj_cli.py login-beatport --brave  # force-read session cookie from Brave's local store
 uv run dj_cli.py login-beatport --cookie # refresh via BEATPORT_SESSION_TOKEN only
 ```
 
-**How `--ui` works:** opens a real browser window (Brave/Chrome if installed, else Chromium) with a persistent profile at `~/.playlist-syncer/browser-profile`. If you're already logged in, the token is grabbed and the window closes. Otherwise log in and it closes once the session is detected.
+**How `--brave` works:** reads the `__Secure-next-auth.session-token` and `cf_clearance` cookies directly from Brave's on-disk cookie store via `browser-cookie3`, persists `cf_clearance` to `.env`, then calls Beatport's `/api/auth/session` to mint a fresh access token. No browser window opens. Requires you to be logged into beatport.com in Brave. If Beatport returns `RefreshAccessTokenError`, sign out and back in on beatport.com to rotate the NextAuth session.
 
 **Token lifetime:** `BEATPORT_ACCESS_TOKEN` expires in ~10 min. `BEATPORT_SESSION_TOKEN` lasts ~32 days. As long as the session token is valid, all stages auto-refresh the access token.
 
@@ -587,7 +587,7 @@ Get Beatport tokens manually if needed:
 2. DevTools → Network → find `/api/auth/session` → response JSON → copy `token.accessToken` → `BEATPORT_ACCESS_TOKEN`
 3. DevTools → Application → Cookies → copy `__Secure-next-auth.session-token` (~3 KB value) → `BEATPORT_SESSION_TOKEN`
 
-Or run `dj login-beatport --ui` and it does this automatically.
+Or log into beatport.com in Brave and run `dj login-beatport --brave` — it reads the cookies and refreshes the token automatically.
 
 ---
 

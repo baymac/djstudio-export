@@ -67,14 +67,8 @@ Examples:
         help="Fetch a fresh Beatport token and save it to .env",
     )
     mode = lb_p.add_mutually_exclusive_group()
-    mode.add_argument("--ui", action="store_true",
-                      help="Browser login with visible window (use if headless is blocked by Cloudflare)")
     mode.add_argument("--cookie", action="store_true",
                       help="Refresh via BEATPORT_SESSION_TOKEN cookie")
-    mode.add_argument("--cdp", action="store_true",
-                      help="Attach to running Brave via CDP (port 9222) and run the auth call from "
-                           "inside Brave itself — bypasses every Cloudflare fingerprint check. "
-                           "Requires Brave launched with --remote-debugging-port=9222.")
     mode.add_argument("--brave", action="store_true",
                       help="Read session cookie from Brave's local store (no browser window needed)")
 
@@ -92,7 +86,24 @@ def _handle_login_beatport(args) -> None:
         extra = " + session cookie" if session else ""
         console.print(f"[green]Token{extra} saved to .env[/green] — expires in ~10 min, session cookie will auto-refresh.")
 
-    if not args.ui and not args.cookie and not getattr(args, "brave", False):
+    def _refresh_from_browser() -> Optional[tuple[str, str]]:
+        """Read session+cf_clearance from Brave, persist cf_clearance, refresh.
+
+        Returns (token, session_cookie) on success or None on failure.
+        """
+        try:
+            session_cookie, cf_clear = bp_api._read_beatport_cookies_from_browser()
+        except RuntimeError as e:
+            console.print(f"[red]Brave cookie read failed:[/red] {e}")
+            return None
+        if cf_clear:
+            bp_api.save_cf_clearance_to_env(cf_clear)
+        token = bp_api.refresh_via_session(session_cookie, verbose=True)
+        if not token:
+            return None
+        return token, session_cookie
+
+    if not args.cookie and not getattr(args, "brave", False):
         import os, time as _t
         current = os.environ.get("BEATPORT_ACCESS_TOKEN", "").strip()
         if current:
@@ -100,19 +111,15 @@ def _handle_login_beatport(args) -> None:
                 current = f"Bearer {current}"
             remaining = int(bp_api._jwt_payload(current).get("exp", 0) - _t.time())
             if remaining > 0:
-                console.print(f"[green]Token still valid[/green] — expires in {remaining}s. Use --brave, --cookie, or --ui to force refresh.")
+                console.print(f"[green]Token still valid[/green] — expires in {remaining}s. Use --brave or --cookie to force refresh.")
                 return
 
     if getattr(args, "brave", False):
-        try:
-            session_cookie = bp_api.capture_session_from_brave()
-        except RuntimeError as e:
-            console.print(f"[red]Brave cookie read failed:[/red] {e}")
+        result = _refresh_from_browser()
+        if not result:
+            console.print("[red]Brave cookie refresh failed — log into beatport.com in Brave, then re-run.[/red]")
             sys.exit(1)
-        token = bp_api.refresh_via_session(session_cookie)
-        if not token:
-            console.print("[red]Session cookie refresh failed — try logging into Beatport in Brave first.[/red]")
-            sys.exit(1)
+        token, session_cookie = result
         _save_and_report(token, session_cookie)
         return
 
@@ -121,60 +128,33 @@ def _handle_login_beatport(args) -> None:
         if not session_cookie:
             console.print("[red]BEATPORT_SESSION_TOKEN not set in .env[/red]")
             sys.exit(1)
-        token = bp_api.refresh_via_session(session_cookie)
+        token = bp_api.refresh_via_session(session_cookie, verbose=True)
         if not token:
             console.print("[red]Session cookie refresh failed — cookie may be expired.[/red]")
             sys.exit(1)
         _save_and_report(token)
         return
 
-    if args.cdp:
-        console.print("[dim]Connecting to running Brave via CDP (localhost:9222) and fetching access token from inside Brave…[/dim]")
-        try:
-            token = bp_api.capture_session_via_cdp()
-        except RuntimeError as e:
-            console.print(f"[red]CDP login failed:[/red] {e}")
-            sys.exit(1)
-        _save_and_report(token)
-        return
-
-    if args.ui:
-        console.print("[dim]Opening visible browser to grab Beatport session…[/dim]")
-        import os as _os
-        username = _os.environ.get("BEATPORT_USERNAME", "").strip() or None
-        password = _os.environ.get("BEATPORT_PASSWORD", "").strip() or None
-        try:
-            token, session = bp_api.capture_token(username, password, headless=False)
-        except RuntimeError as e:
-            console.print(f"[red]Login failed:[/red] {e}")
-            sys.exit(1)
-        _save_and_report(token, session)
-        return
-
     # No flag — auto mode: try session cookie, then Brave store
     import os as _os
     session_cookie = _os.environ.get("BEATPORT_SESSION_TOKEN", "").strip()
     if session_cookie:
-        token = bp_api.refresh_via_session(session_cookie)
+        token = bp_api.refresh_via_session(session_cookie, verbose=True)
         if token:
             _save_and_report(token)
             return
         console.print("[yellow]Session cookie refresh failed — trying Brave cookie store…[/yellow]")
 
-    try:
-        session_cookie = bp_api.capture_session_from_brave()
-        token = bp_api.refresh_via_session(session_cookie)
-        if token:
-            _save_and_report(token, session_cookie)
-            return
-        console.print("[red]Brave cookie found but refresh failed — it may be stale.[/red]")
-    except RuntimeError:
-        pass
+    result = _refresh_from_browser()
+    if result:
+        token, browser_session = result
+        _save_and_report(token, browser_session)
+        return
 
     console.print(
         "[red]Could not get a valid Beatport token.[/red]\n"
-        "Log into beatport.com in Brave, then run [bold]dj login-beatport[/bold] again.\n"
-        "Or use [bold]dj login-beatport --ui[/bold] to log in with a browser window."
+        "Log into beatport.com in Brave (sign out and back in if needed to rotate "
+        "the NextAuth session), then run [bold]dj login-beatport[/bold] again."
     )
     sys.exit(1)
 

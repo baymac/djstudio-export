@@ -77,7 +77,7 @@ uv run playwright install chromium
 uv run pytest
 
 # Auth
-uv run dj_cli.py login-beatport          # auto / --ui / --cookie
+uv run dj_cli.py login-beatport          # auto / --brave / --cookie
 
 # Pipeline (see README.md for full flow)
 uv run dj_cli.py sync music-beatport sync --library
