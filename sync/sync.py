@@ -49,28 +49,14 @@ def get_or_refresh_token() -> str:
     """Return a Beatport Bearer token.
 
     Priority:
-    1. BEATPORT_ACCESS_TOKEN env var
-    2. Cached token in DB
-    3. Refresh via BEATPORT_SESSION_TOKEN cookie
+    1. BEATPORT_ACCESS_TOKEN env var (valid JWT)
+    2. BEATPORT_SESSION_TOKEN cookie → refresh
+    3. Brave cookie store → refresh
     4. Browser login via BEATPORT_USERNAME + BEATPORT_PASSWORD
     """
-    import time as _time
-    session_cookie = os.environ.get("BEATPORT_SESSION_TOKEN", "").strip()
-
-    access_token = os.environ.get("BEATPORT_ACCESS_TOKEN", "").strip()
-    if access_token:
-        if not access_token.startswith("Bearer "):
-            access_token = f"Bearer {access_token}"
-        payload = api._jwt_payload(access_token)
-        if payload.get("exp", 0) > _time.time():
-            return access_token
-        # expired — fall through to refresh
-
-    if session_cookie:
-        new_token = api.refresh_via_session(session_cookie)
-        if new_token:
-            api.save_token_to_env(new_token)
-            return new_token
+    token = api.resolve_access_token()
+    if token:
+        return token
 
     username = os.environ.get("BEATPORT_USERNAME", "").strip()
     password = os.environ.get("BEATPORT_PASSWORD", "").strip() or None
@@ -105,24 +91,16 @@ def make_bp_client() -> tuple[api.Beatport, object]:
     def on_401():
         nonlocal token
         console.print("[yellow]Token expired — refreshing via session…[/yellow]")
-        import os as _os
-        session_cookie = _os.environ.get("BEATPORT_SESSION_TOKEN", "").strip()
-        if session_cookie:
-            new_token = api.refresh_via_session(session_cookie)
-            if new_token:
-                token = new_token
-                client.headers["authorization"] = token
-                api.save_token_to_env(token)
-                console.print("[dim]Token refreshed.[/dim]")
-                return
+        new_token = api.resolve_access_token(force_refresh=True)
+        if new_token:
+            token = new_token
+            client.headers["authorization"] = token
+            console.print("[dim]Token refreshed.[/dim]")
+            return
         console.print(
-            "[red]Token expired and session refresh failed.[/red]\n\n"
-            "The session cookie's refresh token has been rotated. Get fresh tokens:\n"
-            "  1. Open beatport.com in a browser (logged in)\n"
-            "  2. DevTools → Network → /api/auth/session → copy token.accessToken\n"
-            "     → set as [bold]BEATPORT_ACCESS_TOKEN[/bold] in .env\n"
-            "  3. DevTools → Application → Cookies → copy [bold]__Secure-next-auth.session-token[/bold]\n"
-            "     → set as [bold]BEATPORT_SESSION_TOKEN[/bold] in .env"
+            "[red]Token expired and session refresh failed.[/red]\n"
+            "Tried env session cookie and Brave's cookie store. "
+            "Run [bold]dj login-beatport --ui[/bold] to log in interactively."
         )
         sys.exit(1)
 
