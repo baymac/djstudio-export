@@ -157,3 +157,66 @@ canvas { opacity: 0; transition: opacity 0.15s; }
   object-fit: contain;
   display: block;
 }
+
+/* ──────────────────────────────────────────────────────────────────────────
+   Corner buttons (bottom-right) — demo + shortcuts
+   ────────────────────────────────────────────────────────────────────────── */
+#corner-btns {
+  position: fixed; bottom: 14px; right: 14px;
+  display: flex; gap: 6px; align-items: center;
+  z-index: 10;
+}
+
+#shortcuts-btn {
+  background: rgba(255,255,255,0.05);
+  border: 1px solid rgba(255,255,255,0.10);
+  color: rgba(255,255,255,0.28);
+  font: 11px monospace; letter-spacing: 0.06em;
+  cursor: pointer; padding: 4px 8px;
+  transition: all 0.15s;
+  width: 26px; height: 26px;
+}
+#shortcuts-btn:hover {
+  color: rgba(255,255,255,0.7); background: rgba(255,255,255,0.10);
+  border-color: rgba(255,255,255,0.25);
+}
+#shortcuts-btn.open { color: rgba(255,255,255,0.8); background: rgba(255,255,255,0.10); }
+#shortcuts-btn.demo-on { color: rgba(255,100,80,0.85); border-color: rgba(255,100,80,0.35); }
+
+/* ──────────────────────────────────────────────────────────────────────────
+   Shortcuts panel — pops up above the corner button
+   ────────────────────────────────────────────────────────────────────────── */
+#shortcuts-panel {
+  position: fixed; bottom: 50px; right: 14px;
+  background: rgba(6,6,16,0.93);
+  border: 1px solid rgba(255,255,255,0.12);
+  padding: 10px 14px; z-index: 10;
+  min-width: 160px;
+}
+.sc-row {
+  display: flex; gap: 10px; align-items: center;
+  padding: 3px 0; font: 11px monospace;
+  color: rgba(255,255,255,0.45); letter-spacing: 0.05em;
+}
+.sc-row span { color: rgba(255,255,255,0.35); }
+kbd {
+  display: inline-block;
+  background: rgba(255,255,255,0.07);
+  border: 1px solid rgba(255,255,255,0.16);
+  padding: 1px 5px; font: 11px monospace;
+  color: rgba(255,255,255,0.7);
+  min-width: 20px; text-align: center;
+}
+.sc-divider {
+  height: 1px; background: rgba(255,255,255,0.08);
+  margin: 4px 0;
+}
+.sc-toggle { cursor: pointer; transition: color 0.15s; }
+.sc-toggle:hover { color: rgba(255,255,255,0.8); }
+.sc-toggle:hover span { color: rgba(255,255,255,0.7); }
+.sc-toggle.active span { color: rgba(255,100,80,0.95); }
+.sc-toggle.active kbd {
+  color: rgba(255,100,80,0.95);
+  border-color: rgba(255,100,80,0.40);
+  background: rgba(255,100,80,0.10);
+}
