@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Romantic Show</title>
+  <link rel="stylesheet" href="src/styles.css">
+  <script src="https://cdn.jsdelivr.net/npm/p5@1.9.0/lib/p5.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/meyda@5.6.0/dist/web/meyda.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/aubiojs@0.1.1/build/aubio.js"></script>
+</head>
+<body>
+
+<!-- Setup screen: full-screen tap target, one click to start -->
+<div id="setup" onclick="Show.ui.startDefault()" style="display:none">
+  <div id="tap-hint">TAP TO START</div>
+  <div id="setup-status"></div>
+  <button id="toggle-picker" onclick="event.stopPropagation(); Show.ui.togglePicker()">pick audio device</button>
+  <div id="device-list" style="display:none"></div>
+</div>
+
+<!-- In-show overlays -->
+<div id="scene-name"></div>
+<div id="hud">1 CAT &nbsp;· &nbsp;2 KISS &nbsp;· &nbsp;3 BEACH &nbsp;· &nbsp;4 HEARTS &nbsp;· &nbsp;5 ALL CATS &nbsp;· &nbsp;6 OIIA &nbsp;· &nbsp;F FULL &nbsp;· &nbsp;D DEBUG</div>
+
+<div id="debug" class="visible">
+  <div class="bar-wrap">
+    <div class="db-label">BASS</div>
+    <div class="bar-bg"><div class="bar-fill" id="bar-bass" style="width:0%"></div></div>
+  </div>
+  <div class="bar-wrap">
+    <div class="db-label">MID</div>
+    <div class="bar-bg"><div class="bar-fill" id="bar-mid" style="width:0%;background:#44aaff"></div></div>
+  </div>
+  <div class="bar-wrap">
+    <div class="db-label">HIGH</div>
+    <div class="bar-bg"><div class="bar-fill" id="bar-high" style="width:0%;background:#44ffaa"></div></div>
+  </div>
+  <div><div class="db-label">BPM</div>    <div class="db-val" id="val-bpm">--</div></div>
+  <div><div class="db-label">STATE</div>  <div class="db-val" id="val-state">--</div></div>
+  <div><div class="db-label">ENERGY</div> <div class="db-val" id="val-energy">--</div></div>
+  <div><div class="db-label">LEFT</div>   <div class="db-val" id="val-countdown">--</div></div>
+</div>
+
+<!-- Shaders -->
+<script src="src/shaders/vertex.js"></script>
+
+<!-- Cat pose files — loaded before cat.js so it can concatenate them -->
+<script src="src/shaders/poses/cat_pose_helpers.js"></script>
+<script src="src/shaders/poses/cat_pose_sleep.js"></script>
+<script src="src/shaders/poses/cat_pose_sit.js"></script>
+<script src="src/shaders/poses/cat_pose_run.js"></script>
+<script src="src/shaders/poses/cat_pose_yoga_cat.js"></script>
+<script src="src/shaders/poses/cat_pose_cobra.js"></script>
+<script src="src/shaders/poses/cat_pose_spin.js"></script>
+
+<script src="src/shaders/cat.js"></script>
+<script src="src/shaders/cat_sit.js"></script>
+<script src="src/shaders/kiss.js"></script>
+<script src="src/shaders/beach.js"></script>
+<script src="src/shaders/hearts.js"></script>
+<script src="src/shaders/oiia.js"></script>
+
+<!-- App modules (order matters: deps first) -->
+<script src="src/js/audio.js"></script>
+<script src="src/js/state.js"></script>
+<script src="src/js/scene.js"></script>
+<script src="src/js/ui.js"></script>
+<script src="src/js/main.js"></script>
+
+</body>
+</html>

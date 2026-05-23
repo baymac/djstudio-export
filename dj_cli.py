@@ -25,6 +25,7 @@ from detect.cli import add_detect_subparser, dispatch as dispatch_detect
 from sync.cli import add_sync_subparser, dispatch as dispatch_sync
 from playlist.cli import add_playlist_subparser, dispatch as dispatch_playlist
 from apps.course.cli import run_start as course_start, run_stop as course_stop
+from vj.cli import run_start as vj_start, run_stop as vj_stop, list_apps as vj_list_apps
 
 
 def _build_parser():
@@ -56,11 +57,17 @@ Examples:
     course_sub.add_parser("start", help=f"Start the viewer and open https://course.localhost")
     course_sub.add_parser("stop", help="Stop the viewer")
 
-    return parser, detect_p, sync_p, playlist_p, course_p
+    vj_apps = vj_list_apps()
+    vj_help = f"Start/stop a VJ visualizer under vj/<name>/ (available: {', '.join(vj_apps) or 'none yet'})"
+    vj_p = sub.add_parser("vj", help=vj_help)
+    vj_p.add_argument("name", nargs="?", help="VJ app directory name under vj/")
+    vj_p.add_argument("action", nargs="?", choices=["start", "stop"], help="start or stop")
+
+    return parser, detect_p, sync_p, playlist_p, course_p, vj_p
 
 
 def main() -> None:
-    parser, detect_p, sync_p, playlist_p, course_p = _build_parser()
+    parser, detect_p, sync_p, playlist_p, course_p, vj_p = _build_parser()
     args = parser.parse_args()
 
     if args.command == "detect":
@@ -76,6 +83,17 @@ def main() -> None:
             course_stop()
         else:
             course_p.print_help()
+    elif args.command == "vj":
+        if not args.name or not args.action:
+            vj_p.print_help()
+            apps = vj_list_apps()
+            if apps:
+                print(f"\nAvailable VJ apps: {', '.join(apps)}")
+            return
+        if args.action == "start":
+            vj_start(args.name)
+        else:
+            vj_stop(args.name)
     else:
         parser.print_help()
 

@@ -26,6 +26,8 @@ uv sync
 uv run playwright install chromium   # needed for Beatport browser login
 ```
 
+Node.js (v18+) and npm are required for `dj vj cats start` and `dj course start`. Install via [nodejs.org](https://nodejs.org) or your package manager (`brew install node`). The first `start` run auto-installs npm dependencies.
+
 Copy `.env.example` to `.env` and fill in credentials before using `detect` or `sync`.
 
 Rekordbox must be **closed** before any rekordbox write (`detect export-to-rekordbox`, `detect import-rekordbox-analysis`, `playlist rekordbox`).
@@ -80,8 +82,6 @@ Each enrichment stage is idempotent. `enriched_tracks_analysis` carries per-stag
 
 ```
 dj
-├── login-beatport [--ui | --cookie]                   Refresh Beatport tokens
-
 ├── sync                                               Stage 1: Apple Music → Beatport
 │   └── music-beatport
 │       ├── check-connections
@@ -135,17 +135,15 @@ dj
 
 ---
 
-## login-beatport
+## Beatport auth
 
-Stages 1, 3, and 4 talk to Beatport. They need `BEATPORT_ACCESS_TOKEN` and `BEATPORT_SESSION_TOKEN` in `.env`. Run this once to bootstrap; after that the token auto-refreshes.
+Stages 1, 3, and 4 talk to Beatport. Auth is handled transparently by `connections/beatport.resolve_access_token`:
 
-```bash
-uv run dj_cli.py login-beatport          # auto: tries session cookie, then browser
-uv run dj_cli.py login-beatport --ui     # open a visible browser window to log in
-uv run dj_cli.py login-beatport --cookie # refresh via BEATPORT_SESSION_TOKEN only
-```
+1. `BEATPORT_ACCESS_TOKEN` in `.env` (used if still valid)
+2. `BEATPORT_SESSION_TOKEN` cookie in `.env` → refresh via Beatport's `/api/auth/session`
+3. Browser cookie store (Brave by default, see `connections/cookies.py`) → same refresh
 
-**How `--ui` works:** opens a real browser window (Brave/Chrome if installed, else Chromium) with a persistent profile at `~/.playlist-syncer/browser-profile`. If you're already logged in, the token is grabbed and the window closes. Otherwise log in and it closes once the session is detected.
+To bootstrap, sign into beatport.com in your default browser — every Beatport call refreshes the access token as needed and persists rotations back to `.env` (including a fresh `cf_clearance`). If Beatport returns `RefreshAccessTokenError`, sign out and back in on beatport.com to rotate the NextAuth session.
 
 **Token lifetime:** `BEATPORT_ACCESS_TOKEN` expires in ~10 min. `BEATPORT_SESSION_TOKEN` lasts ~32 days. As long as the session token is valid, all stages auto-refresh the access token.
 
@@ -576,18 +574,12 @@ SPOTIFY_CLIENT_SECRET    Spotify app client secret
 SOUNDCLOUD_CLIENT_ID     SoundCloud app client ID (for detect soundcloud + detect gems)
 SOUNDCLOUD_CLIENT_SECRET SoundCloud app client secret
 SOUNDCLOUD_REDIRECT_URI  OAuth callback URL (for detect login-soundcloud)
-
-# Optional — only needed for headless browser login
-BEATPORT_USERNAME        Beatport email
-BEATPORT_PASSWORD        Beatport password
 ```
 
-Get Beatport tokens manually if needed:
+Beatport auth runs from your default browser's cookie store — no env vars to set. Just sign into beatport.com once. If you need to seed the tokens manually:
 1. Open `beatport.com` in a browser (logged in)
 2. DevTools → Network → find `/api/auth/session` → response JSON → copy `token.accessToken` → `BEATPORT_ACCESS_TOKEN`
 3. DevTools → Application → Cookies → copy `__Secure-next-auth.session-token` (~3 KB value) → `BEATPORT_SESSION_TOKEN`
-
-Or run `dj login-beatport --ui` and it does this automatically.
 
 ---
 
@@ -838,6 +830,33 @@ See `apps/1001T-extension/README.md` for the full file layout and dev notes.
 
 ---
 
+## VJ visualizer — `vj/cats/`
+
+An audio-reactive browser visualizer built around a DJ's cats — procedural cat
+poses in WebGL, real cat photos that dance to the music, and cinematic AI videos
+that ping-pong loop. Vite + p5.js + Meyda + aubio.js, runs entirely in the
+browser, no backend.
+
+```bash
+dj vj cats start            # first run: `npm install` runs automatically (~30s)
+                            # opens https://cats.localhost
+dj vj cats stop             # kill the background process group
+```
+
+Tap **TAP TO START**, grant mic permission, play music — the show cycles
+through four sections forever (intro → procedural cat dots → photo cats →
+cinematic catwoman videos). Keys: `F` fullscreen, `D` debug HUD, `N`/`M` skip
+section/scene, `R` rotate canvas.
+
+Local-only — there's no hosted deploy. The command auto-discovers any
+`vj/<name>/` subdirectory with a `package.json` that has a `dev` script, so
+adding a new VJ app is just `mkdir vj/whatever && cd vj/whatever && npm init`;
+`dj vj whatever start` will work the next time you run it (no code change in
+the CLI needed). See `vj/cats/README.md` for the asset recipes, audio routing
+setup (BlackHole / VB-Audio Cable), and the full scene mod guide.
+
+---
+
 ## Tests
 
 ```bash
@@ -849,7 +868,7 @@ uv run pytest
 ## Package layout
 
 ```
-dj_cli.py                       CLI entrypoint — detect / sync / playlist / login-beatport
+dj_cli.py                       CLI entrypoint — detect / sync / playlist / course / vj
 
 connections/                    Transport layer — no app-specific dependencies
   beatport.py                   Beatport HTTP client + Playwright session token capture
@@ -906,6 +925,33 @@ apps/                           Frontend apps exposed via `dj <name>` commands
     qa-test.js                  Playwright headed end-to-end QA
     screenshot.png              PiP window with active-track highlight
 
+vj/                             Audio-reactive visuals for the DJ booth
+  cli.py                        `dj vj <name> start/stop` — auto-discovers any
+                                vj/<name>/ with a package.json and runs it via
+                                portless (HTTPS at https://<name>.localhost)
+  cats/                         p5.js + Meyda + aubio.js — procedural cat poses,
+                                photo-cat scenes, ping-pong AI videos. Local-only,
+                                no hosted deploy.
+
 helpers/                        Standalone maintenance scripts + course tools
   download_course.py            Course downloader (browser scrape + Dyntube/Circle HLS)
 ```
+
+---
+
+## Credits
+
+**Built by [baymac](https://github.com/baymac) for JAKE FURY**
+
+- SoundCloud — https://soundcloud.com/jake_fk
+- Mixcloud — https://www.mixcloud.com/jake_fk/
+- Instagram — https://www.instagram.com/jakefury.dj/
+
+The VJ visualizer at `vj/cats/` features **Mewtwo** (orange) and **Chewtwo**
+(grey), and is built with [p5.js](https://p5js.org), [Meyda](https://meyda.js.org),
+[aubio.js](https://github.com/qiuxiang/aubiojs), and [Vite](https://vitejs.dev).
+Inspiration: TouchDesigner VJ workflows, the OIIA cat meme.
+
+## License
+
+MIT. Fork it, remix it, ship your own DJ tooling. See [LICENSE](LICENSE).

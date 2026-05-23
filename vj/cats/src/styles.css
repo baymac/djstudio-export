@@ -1,0 +1,159 @@
+/* ──────────────────────────────────────────────────────────────────────────
+   Base
+   ────────────────────────────────────────────────────────────────────────── */
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { background: #000; overflow: hidden; font-family: monospace; }
+canvas { opacity: 0; transition: opacity 0.15s; }
+
+/* ──────────────────────────────────────────────────────────────────────────
+   Setup overlay — full-screen tap target, one click starts audio
+   ────────────────────────────────────────────────────────────────────────── */
+#setup {
+  position: fixed; inset: 0;
+  background: #060610;
+  display: none; flex-direction: column;
+  align-items: center; justify-content: center;
+  gap: 20px; z-index: 100;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.4s;
+}
+
+#tap-hint {
+  color: rgba(255,255,255,0.75);
+  font-size: 22px; letter-spacing: 0.35em;
+  animation: pulse 2s ease-in-out infinite;
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 0.75; }
+  50%       { opacity: 0.35; }
+}
+
+#setup-status {
+  color: #ff6655; font-size: 11px;
+  letter-spacing: 0.1em; min-height: 14px;
+}
+
+#toggle-picker {
+  color: rgba(255,255,255,0.18); font: 11px monospace;
+  cursor: pointer; background: none; border: none;
+  letter-spacing: 0.08em; padding: 4px 8px;
+}
+#toggle-picker:hover { color: rgba(255,255,255,0.45); }
+
+#device-list {
+  display: flex; flex-direction: column;
+  gap: 8px; min-width: 320px;
+  max-height: 220px; overflow-y: auto;
+}
+.device-btn {
+  background: #0e0e20; border: 1px solid rgba(255,255,255,0.10);
+  color: rgba(255,255,255,0.6); padding: 10px 16px;
+  font: 12px monospace; letter-spacing: 0.06em;
+  cursor: pointer; text-align: left; transition: all 0.15s;
+}
+.device-btn:hover { background: #1a1a35; border-color: rgba(255,255,255,0.35); color: #fff; }
+.device-btn.blackhole { border-color: #5566ff; color: #99aaff; }
+.device-btn.blackhole:hover { background: #111130; border-color: #8899ff; }
+
+/* ──────────────────────────────────────────────────────────────────────────
+   Segment-name flash (auto on transition)
+   ────────────────────────────────────────────────────────────────────────── */
+#scene-name {
+  position: fixed; top: 50%; width: 100%;
+  text-align: center; color: rgba(255,255,255,0.7);
+  font: bold 32px/1 monospace; letter-spacing: 0.2em;
+  pointer-events: none; z-index: 5;
+  opacity: 0; transition: opacity 0.4s;
+  transform: translateY(-50%);
+}
+
+/* ──────────────────────────────────────────────────────────────────────────
+   Debug bar (hidden until D pressed)
+   ────────────────────────────────────────────────────────────────────────── */
+#debug {
+  position: fixed; top: 16px; left: 50%; transform: translateX(-50%);
+  display: none; gap: 24px; align-items: center;
+  background: rgba(0,0,0,0.55); padding: 8px 18px;
+  pointer-events: none; z-index: 5;
+}
+#debug.visible { display: flex; }
+
+.db-label {
+  color: rgba(255,255,255,0.35);
+  font: 10px monospace; letter-spacing: 0.08em;
+}
+.db-val {
+  color: rgba(255,255,255,0.8);
+  font: 12px monospace;
+}
+.bar-wrap {
+  display: flex; flex-direction: column;
+  align-items: center; gap: 3px;
+}
+.bar-bg   { width: 36px; height: 4px; background: rgba(255,255,255,0.08); }
+.bar-fill { height: 4px; background: #ff6644; transition: width 0.05s; }
+
+/* ──────────────────────────────────────────────────────────────────────────
+   Duet pose labels — appear under each cat when the duet pose plays.
+   Container is sized to the canvas (9:16 portrait, centered) so the % positions
+   below anchor to the cats, not to the viewport.
+   ────────────────────────────────────────────────────────────────────────── */
+#duet-labels {
+  position: fixed;
+  top: 50%; left: 50%;
+  transform: translate(-50%, -50%);
+  width:  min(100vw, 100vh * 9 / 16);
+  height: min(100vh, 100vw * 16 / 9);
+  pointer-events: none; z-index: 6;
+  opacity: 0;
+  transition: opacity 0.5s ease;
+}
+#duet-labels.show { opacity: 1; }
+
+#lbl-mewtwo, #lbl-chewtwo {
+  position: absolute;
+  top: 64%;
+  font: bold 14px monospace;
+  letter-spacing: 0.28em;
+  text-shadow: 0 0 14px rgba(0,0,0,0.9), 0 1px 0 rgba(0,0,0,0.8);
+}
+#lbl-mewtwo  { left: 32.6%; color: #ffa658;  transform: translate(-50%, 0); }
+#lbl-chewtwo { left: 67.4%; color: #d4d6e0;  transform: translate(-50%, 0); }
+
+/* ──────────────────────────────────────────────────────────────────────────
+   Resting state — DJ branding poster shown when no music is playing.
+   Container is sized to the canvas (9:16) and rotates with everything else.
+   ────────────────────────────────────────────────────────────────────────── */
+#rest-screen {
+  position: fixed;
+  top: 50%; left: 50%;
+  transform: translate(-50%, -50%);
+  width:  min(100vw, 100vh * 9 / 16);
+  height: min(100vh, 100vw * 16 / 9);
+  background: #000;
+  display: none;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0;
+  padding: 0;
+  pointer-events: none;
+  z-index: 4;
+}
+#rest-screen.show { display: flex; }
+
+#rest-logo {
+  width: 86%;
+  max-height: 32%;
+  object-fit: contain;
+  display: block;
+  margin-bottom: -2%; /* nudge into the cat's top edge for one continuous black */
+}
+#rest-cat {
+  width: 86%;
+  max-height: 62%;
+  object-fit: contain;
+  display: block;
+}
