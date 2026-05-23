@@ -2,6 +2,18 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.3.0] - 2026-05-23
+
+### Added
+- **VJ visualizer** (`vj/cats/`) — audio-reactive browser visualizer built around the DJ's cats; procedural cat poses in WebGL, real cat photos that dance to the music, and cinematic AI videos that ping-pong loop; Vite + p5.js + Meyda + aubio.js, runs entirely in the browser
+- **`dj vj <name> start/stop`** CLI subcommand — auto-discovers any `vj/<name>/` subdirectory with a `package.json` dev script and runs it via portless at `https://<name>.localhost`; no code change needed to add new VJ apps
+- **MIT LICENSE** — project is now open-source (fork it, remix it, ship your own DJ tooling)
+- Credits section in README (`baymac` / JAKE FURY) and acknowledgments for p5.js, Meyda, aubio.js, Vite, and the OIIA cat meme
+
+### Changed
+- `pyproject.toml` — `vj*` added to `setuptools.packages.find` so the installed `dj` script finds `vj.cli`
+- README — VJ visualizer section added; layout section updated; Credits + License section appended
+
 ## [0.1.2.0] - 2026-05-23
 
 ### Added

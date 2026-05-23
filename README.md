@@ -838,6 +838,33 @@ See `apps/1001T-extension/README.md` for the full file layout and dev notes.
 
 ---
 
+## VJ visualizer — `vj/cats/`
+
+An audio-reactive browser visualizer built around a DJ's cats — procedural cat
+poses in WebGL, real cat photos that dance to the music, and cinematic AI videos
+that ping-pong loop. Vite + p5.js + Meyda + aubio.js, runs entirely in the
+browser, no backend.
+
+```bash
+dj vj cats start            # first run: `npm install` runs automatically (~30s)
+                            # opens https://cats.localhost
+dj vj cats stop             # kill the background process group
+```
+
+Tap **TAP TO START**, grant mic permission, play music — the show cycles
+through four sections forever (intro → procedural cat dots → photo cats →
+cinematic catwoman videos). Keys: `F` fullscreen, `D` debug HUD, `N`/`M` skip
+section/scene, `R` rotate canvas.
+
+Local-only — there's no hosted deploy. The command auto-discovers any
+`vj/<name>/` subdirectory with a `package.json` that has a `dev` script, so
+adding a new VJ app is just `mkdir vj/whatever && cd vj/whatever && npm init`;
+`dj vj whatever start` will work the next time you run it (no code change in
+the CLI needed). See `vj/cats/README.md` for the asset recipes, audio routing
+setup (BlackHole / VB-Audio Cable), and the full scene mod guide.
+
+---
+
 ## Tests
 
 ```bash
@@ -906,6 +933,33 @@ apps/                           Frontend apps exposed via `dj <name>` commands
     qa-test.js                  Playwright headed end-to-end QA
     screenshot.png              PiP window with active-track highlight
 
+vj/                             Audio-reactive visuals for the DJ booth
+  cli.py                        `dj vj <name> start/stop` — auto-discovers any
+                                vj/<name>/ with a package.json and runs it via
+                                portless (HTTPS at https://<name>.localhost)
+  cats/                         p5.js + Meyda + aubio.js — procedural cat poses,
+                                photo-cat scenes, ping-pong AI videos. Local-only,
+                                no hosted deploy.
+
 helpers/                        Standalone maintenance scripts + course tools
   download_course.py            Course downloader (browser scrape + Dyntube/Circle HLS)
 ```
+
+---
+
+## Credits
+
+**Built by [baymac](https://github.com/baymac) for JAKE FURY**
+
+- SoundCloud — https://soundcloud.com/jake_fk
+- Mixcloud — https://www.mixcloud.com/jake_fk/
+- Instagram — https://www.instagram.com/jakefury.dj/
+
+The VJ visualizer at `vj/cats/` features **Mewtwo** (orange) and **Chewtwo**
+(grey), and is built with [p5.js](https://p5js.org), [Meyda](https://meyda.js.org),
+[aubio.js](https://github.com/qiuxiang/aubiojs), and [Vite](https://vitejs.dev).
+Inspiration: TouchDesigner VJ workflows, the OIIA cat meme.
+
+## License
+
+MIT. Fork it, remix it, ship your own DJ tooling. See [LICENSE](LICENSE).
