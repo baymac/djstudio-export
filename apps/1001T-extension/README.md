@@ -1,5 +1,7 @@
 # 1001TL PiP — Chrome Extension
 
+> Part of the [`dj`](../../README.md) repo. See [Setup](../../README.md#setup) if you need to install the parent toolkit first.
+
 PiP a DJ mix and see the tracklist while continuing your work. Opens a YouTube video in a floating Document Picture-in-Picture window with the full tracklist from 1001tracklists.com overlaid inside it — the mix and the IDs stay on top of whatever else you're doing.
 
 ![PiP window — YouTube video on top, scrollable tracklist below with active-track highlight](screenshot.png)

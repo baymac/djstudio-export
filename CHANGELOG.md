@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.3.1] - 2026-05-23
+
+### Changed
+- **README setup section** — added `source .venv/bin/activate` step so new users know how to put `dj` on their PATH after `uv sync`; corrected playwright install comment (Beatport login removed; real consumers are SoundCloud browser fetch and `helpers/download_course.py`)
+- **Sub-project READMEs** (`vj/cats/`, `apps/1001T-extension/`) — added one-line backlinks to the root README Setup section so users who land directly on a sub-folder README know where to install dependencies
+- **CLAUDE.md** — corrected playwright install comment to match current consumers
+
 ## [0.1.3.0] - 2026-05-23
 
 ### Added

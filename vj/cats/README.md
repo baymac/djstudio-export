@@ -10,6 +10,8 @@ Ships as a sub-project of the [`dj`](../../README.md) repo at `vj/cats/`. Runs l
 
 ## Quick start
 
+> First time? Run the [setup steps](../../README.md#setup) from the repo root to install dependencies and put `dj` on your PATH.
+
 ```bash
 dj vj cats start         # from anywhere — npm install runs on first launch
                          # opens https://cats.localhost in the default browser

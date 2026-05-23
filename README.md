@@ -23,7 +23,8 @@ All tool-generated files live under `~/Music/dj/`:
 
 ```bash
 uv sync
-uv run playwright install chromium   # needed for Beatport browser login
+source .venv/bin/activate            # puts `dj` on your PATH
+uv run playwright install chromium   # needed for SoundCloud browser fetch + helpers/download_course.py
 ```
 
 Node.js (v18+) and npm are required for `dj vj cats start` and `dj course start`. Install via [nodejs.org](https://nodejs.org) or your package manager (`brew install node`). The first `start` run auto-installs npm dependencies.
