@@ -96,6 +96,25 @@ def strip_remix(title: str) -> Optional[str]:
     return stripped if stripped != title else None
 
 
+_VS_RE = re.compile(r"\s+vs\.?\s+", re.I)
+
+
+def split_mashup_variants(name: str, artist: str) -> list[tuple[str, str]]:
+    """Return (name, artist) pairs for vs. mashup tracks, or [] if not applicable.
+
+    "A vs. B — T1 vs. T2" → [(T1, A), (T2, B)]
+    "A vs. B — Title"     → [(Title, A), (Title, B)]
+    """
+    artist_parts = _VS_RE.split(artist, maxsplit=1)
+    if len(artist_parts) == 2:
+        title_parts = _VS_RE.split(name, maxsplit=1)
+        if len(title_parts) == 2:
+            return list(zip([p.strip() for p in title_parts], [p.strip() for p in artist_parts]))
+        return [(name, p.strip()) for p in artist_parts]
+
+    return []
+
+
 def search_query(name: str) -> str:
     """Simplify a track title for Beatport search — strip feat and bracket noise,
     keep the remix/edit name so the right version ranks higher."""

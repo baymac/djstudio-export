@@ -113,7 +113,7 @@ async function enterPiP() {
                 display:flex; flex-direction:column; gap:2vw; }
 
     /* always-visible time readout (sibling of overlay) */
-    #time { position:absolute; right:3vw; bottom:2vw; z-index:2;
+    #time { position:absolute; left:3vw; bottom:2vw; z-index:2;
             color:#fff; font-size:2.8vw; line-height:1;
             font-variant-numeric:tabular-nums;
             text-shadow:0 1px 3px rgba(0,0,0,.95), 0 0 6px rgba(0,0,0,.7);
