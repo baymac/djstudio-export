@@ -174,15 +174,28 @@ What it is: **two short AI-generated videos** that play forward, then in reverse
 5. Save as `public/your_scene.mp4`.
 6. **Pre-encode the reverse** for ping-pong playback:
    ```bash
-   ffmpeg -i public/your_scene.mp4 -vf reverse -af areverse public/your_scene_rev.mp4
+   ffmpeg -y -i public/your_scene.mp4 -vf reverse -an \
+     -c:v libx264 -preset slow -crf 20 \
+     -movflags +faststart public/your_scene_rev.mp4
    ```
-   (Why pre-encoded: rAF-driven reverse seeking drops frames at sparse keyframes. Playing a reversed video forward is frame-accurate.)
+   Why each flag matters:
+   - `-vf reverse` — the actual frame reversal
+   - `-an` — strip audio (the player keeps videos muted anyway, smaller file)
+   - `-c:v libx264 -preset slow -crf 20` — re-encode to a clean keyframe structure; the original's sparse keyframes are what made rAF-driven reverse seeking drop frames
+   - `-movflags +faststart` — moves the `moov` atom to the front of the file so the reverse video can start playing instantly at the swap point. Without this you get a freeze frame at the forward→reverse transition while the browser fetches the moov atom from the end of the file.
 7. Register it in `src/js/deck.js:43-47`:
    ```js
    { type: 'video', src: '/your_scene.mp4', label: 'YOUR_LABEL' },
    ```
 
-The video player will auto-load `your_scene_rev.mp4` based on the filename. Both videos play forward natively, swapping on `ended` events.
+The video player will auto-load `your_scene_rev.mp4` based on the filename (`src.replace(/\.mp4$/i, '_rev.mp4')` in `video_player.js:40`). Both videos play forward natively, swapping on `ended` events.
+
+### Anti-stutter measures in `video_player.js`
+
+If you're porting the player to another project, these two details matter:
+
+- **Pre-buffer both legs at construction** — both `<video>` elements are created and `preload='auto'` + `load()`'d up front (`video_player.js:18-35`), not on-demand. The reverse clip is already in the browser's buffer before the forward leg finishes.
+- **`timeupdate` safety net** — the leg swap fires on `ended`, but also as a fallback when `currentTime >= duration - 0.05` (`video_player.js:87-100`). Some codecs / browsers don't reliably emit `ended`, and without this fallback you get a stuck frame for several hundred ms at the swap.
 
 ---
 
