@@ -202,6 +202,52 @@ def _cookies_to_netscape(cookies: list[dict]) -> str:
     return "\n".join(lines)
 
 
+# ---------- cache merge ----------
+
+def _apply_cached_state(lesson, cached: dict) -> None:
+    """Merge a manifest entry from a prior run into a freshly-discovered Lesson.
+
+    Used when re-running with --lesson-ids or after a partial run, so we don't
+    re-scrape lessons that are already complete. Two non-obvious bits:
+
+    1. Section metadata is preserved from cache when present and non-default.
+       _scrape_lesson_list's sidebar walk falls back to "Course" if Circle's
+       chapter-button selector drifts (their Tailwind classes change). Without
+       this guard, a targeted `--lesson-ids` rescrape would overwrite every
+       cached sectionTitle/Index across the whole manifest with "Course".
+
+    2. We do NOT touch lesson.id, lesson.url, or lesson.title — those come
+       from the live sidebar walk and are the source of truth for ordering.
+    """
+    lesson.type = cached.get("type", lesson.type)
+    lesson.extracted = cached.get("extracted", False)
+    lesson.completed = cached.get("completed", False)
+    lesson.video_url = cached.get("videoUrl") or cached.get("video_url")
+    lesson.video_file = cached.get("videoFile") or cached.get("video_file")
+    lesson.thumb_file = cached.get("thumbFile") or cached.get("thumb_file")
+    lesson.content_html = cached.get("contentHtml") or cached.get("content_html") or ""
+    lesson.quiz_file = cached.get("quizFile") or cached.get("quiz_file")
+    lesson.attachments = [
+        Attachment(name=a.get("name", ""), file=a.get("file", ""), size=a.get("size", ""))
+        for a in cached.get("attachments", []) or []
+    ]
+    lesson.subtitles = [
+        Subtitle(
+            label=s.get("label", ""), file=s.get("file", ""),
+            lang=s.get("lang", "en"), default=s.get("default", False),
+        )
+        for s in cached.get("subtitles", []) or []
+    ]
+    cached_sec = cached.get("sectionTitle") or cached.get("section_title")
+    if cached_sec and cached_sec != "Course":
+        lesson.section_title = cached_sec
+        cached_idx = cached.get("sectionIndex")
+        if cached_idx is None:
+            cached_idx = cached.get("section_index")
+        if cached_idx is not None:
+            lesson.section_index = cached_idx
+
+
 # ---------- browser context ----------
 
 async def _open_context(headless: bool = True):
@@ -586,6 +632,22 @@ async def _extract_lesson(page, lesson: Lesson, signals: dict, video_urls: list[
                 size="",
             ))
             lesson.attachments[-1].file = dl["href"]  # tmp store URL in `file` for downloader
+
+    # Refuse to mark Dyntube extraction complete when only the iframe fallback
+    # was captured (no hls-master URL, no key). _download_dyntube needs both;
+    # without them the lesson is unusable and would silently stay broken
+    # because the skip-rule keys on `extracted`.
+    if lesson.type == LessonType.VIDEO_DYNTUBE.value:
+        has_usable_url = lesson.video_url and (
+            "hls-master" in lesson.video_url or ".m3u8" in lesson.video_url
+        )
+        has_key = (KEYS_DIR / f"{lesson.id}.key").exists()
+        if not (has_usable_url and has_key):
+            lesson.error = (
+                f"dyntube: "
+                f"{'no hls-master url' if not has_usable_url else 'no aes key'}"
+            )
+            return  # leave extracted=False so the next run retries
 
     lesson.extracted = True
 
@@ -1677,25 +1739,7 @@ async def cmd_download(course_url: str, limit: Optional[int] = None, dry_run: bo
             # Always merge cached state into the lesson so the manifest stays
             # complete even when --limit caps the active processing count.
             if cached:
-                lesson.type = cached.get("type", lesson.type)
-                lesson.extracted = cached.get("extracted", False)
-                lesson.completed = cached.get("completed", False)
-                lesson.video_url = cached.get("videoUrl") or cached.get("video_url")
-                lesson.video_file = cached.get("videoFile") or cached.get("video_file")
-                lesson.thumb_file = cached.get("thumbFile") or cached.get("thumb_file")
-                lesson.content_html = cached.get("contentHtml") or cached.get("content_html") or ""
-                lesson.quiz_file = cached.get("quizFile") or cached.get("quiz_file")
-                lesson.attachments = [
-                    Attachment(name=a.get("name", ""), file=a.get("file", ""), size=a.get("size", ""))
-                    for a in cached.get("attachments", []) or []
-                ]
-                lesson.subtitles = [
-                    Subtitle(
-                        label=s.get("label", ""), file=s.get("file", ""),
-                        lang=s.get("lang", "en"), default=s.get("default", False),
-                    )
-                    for s in cached.get("subtitles", []) or []
-                ]
+                _apply_cached_state(lesson, cached)
                 # Skip if fully done — already has video file (or doesn't need one).
                 non_video = lesson.type not in (
                     LessonType.VIDEO_CIRCLE.value, LessonType.VIDEO_DYNTUBE.value,
