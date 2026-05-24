@@ -94,9 +94,37 @@ def run_start() -> None:
     time.sleep(3)
     _save_url_from_log(log_path)
     url = _get_url()
+    if not _check_port_match(log_path):
+        console.print(
+            f"[red]Course viewer is up but vite bound to a different port than portless expects[/red] → "
+            f"requests to {url} will return 502.\n"
+            "[dim]Cause: vite saw a config-file change after boot, restarted, and dropped "
+            f"PORT — it's now on its default 5173 instead of portless's allocated port.\n"
+            f"Fix: [bold]dj course stop && dj course start[/bold] (or see {log_path}).[/dim]"
+        )
+        return
     console.print(f"[green]Course viewer started[/green] → {url}")
     _hint_service_install(url)
     _open(url)
+
+
+def _check_port_match(log_path: Path) -> bool:
+    """Return False if portless's expected port and vite's actual port disagree.
+
+    Vite auto-restarts on config-file mtime changes and on restart binds to its
+    default 5173, ignoring the PORT env var portless set — portless keeps
+    proxying to the original port, so every request 502s.
+    """
+    import re
+    try:
+        text = log_path.read_text()
+    except Exception:
+        return True
+    portless_m = re.search(r"Using port (\d+)", text)
+    vite_ports = re.findall(r"localhost:(\d+)/", text)
+    if not portless_m or not vite_ports:
+        return True
+    return portless_m.group(1) == vite_ports[-1]
 
 
 def _save_url_from_log(log_path: Path) -> None:
