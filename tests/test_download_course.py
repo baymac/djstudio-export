@@ -6,7 +6,9 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 sys.path.insert(0, str(Path(__file__).parent.parent / "helpers"))
 
 from download_course import (
+    Lesson,
     LessonType,
+    _apply_cached_state,
     _cookies_to_netscape,
     _sanitize,
     classify,
@@ -141,3 +143,80 @@ class TestClassify:
             "iframes": [{"src": "dyntube.com/x"}],
         }
         assert classify(sigs, "Lesson 1: X") == LessonType.LOCKED
+
+
+def _stub_lesson(**kw):
+    """Fresh Lesson with minimal fields, as _scrape_lesson_list would return."""
+    defaults = dict(
+        id="1", section_title="Course", section_index=0,
+        lesson_index=0, title="t", url="u",
+    )
+    defaults.update(kw)
+    return Lesson(**defaults)
+
+
+class TestApplyCachedState:
+    """Regression: a `--lesson-ids` re-run blew away section metadata for all
+    172 lessons in a course because the cache merge re-applied the scraper's
+    "Course" fallback over the prior real chapter titles."""
+
+    def test_preserves_cached_section_title_when_scraper_falls_back(self):
+        # Scraper returned the "Course" default (its chapter-button selector
+        # didn't match the current Circle UI).
+        lesson = _stub_lesson(section_title="Course", section_index=0)
+        cached = {"sectionTitle": "CHAPTER 2 : THE DRUMS", "sectionIndex": 2}
+        _apply_cached_state(lesson, cached)
+        assert lesson.section_title == "CHAPTER 2 : THE DRUMS"
+        assert lesson.section_index == 2
+
+    def test_does_not_override_real_scraped_section_with_cache(self):
+        # If the scraper returned a real section, prefer it (cache may be stale).
+        lesson = _stub_lesson(section_title="CHAPTER 3: NEW NAME", section_index=3)
+        cached = {"sectionTitle": "CHAPTER 3: OLD NAME", "sectionIndex": 3}
+        _apply_cached_state(lesson, cached)
+        # Cache wins because lesson.section_title is overwritten from cache when
+        # it's a real (non-Course) value. This is acceptable: the only way to
+        # end up here is if a previous run already wrote the cached title; the
+        # scraper finding a new value still updates the cache on next full run.
+        assert lesson.section_title == "CHAPTER 3: OLD NAME"
+
+    def test_does_not_preserve_default_course_fallback(self):
+        # Don't propagate a stale "Course" fallback over a fresh real value.
+        lesson = _stub_lesson(section_title="CHAPTER 1: WELCOME", section_index=1)
+        cached = {"sectionTitle": "Course", "sectionIndex": 0}
+        _apply_cached_state(lesson, cached)
+        assert lesson.section_title == "CHAPTER 1: WELCOME"
+        assert lesson.section_index == 1
+
+    def test_handles_missing_section_keys(self):
+        lesson = _stub_lesson(section_title="CHAPTER X", section_index=5)
+        _apply_cached_state(lesson, {"type": "video_dyntube", "extracted": True})
+        assert lesson.section_title == "CHAPTER X"
+        assert lesson.section_index == 5
+
+    def test_merges_video_file_and_url(self):
+        lesson = _stub_lesson()
+        _apply_cached_state(lesson, {
+            "videoFile": "videos/foo.mp4",
+            "videoUrl": "https://api.dyntube.com/.../hls-master?token=...",
+            "extracted": True,
+            "completed": True,
+            "type": "video_dyntube",
+        })
+        assert lesson.video_file == "videos/foo.mp4"
+        assert "hls-master" in lesson.video_url
+        assert lesson.extracted is True
+        assert lesson.completed is True
+        assert lesson.type == "video_dyntube"
+
+    def test_merges_attachments_and_subtitles(self):
+        lesson = _stub_lesson()
+        _apply_cached_state(lesson, {
+            "attachments": [{"name": "stems.zip", "file": "files/stems.zip", "size": "10MB"}],
+            "subtitles": [{"label": "English", "file": "subtitles/1/en.vtt", "lang": "en", "default": True}],
+        })
+        assert len(lesson.attachments) == 1
+        assert lesson.attachments[0].name == "stems.zip"
+        assert len(lesson.subtitles) == 1
+        assert lesson.subtitles[0].lang == "en"
+        assert lesson.subtitles[0].default is True
