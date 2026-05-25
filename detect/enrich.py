@@ -20,7 +20,7 @@ from rich.progress import (
 
 from caffeinate import caffeinate
 from connections import beatport as bp_api
-from connections.matching import MATCH_THRESHOLD, best_match, search_query, strip_remix
+from connections.matching import MATCH_THRESHOLD, best_match, search_query, split_mashup_variants, strip_remix
 from detect import db as detect_db
 from detect.db import get_enriched_artist_titles, mark_enrich_miss
 
@@ -161,7 +161,7 @@ def run_enrich(
         if verbose:
             progress.log(rich_msg or plain)
 
-    counts = {"seen": 0, "found": 0, "not_found": 0, "fuzzy_miss": 0, "failed": 0, "duplicate": 0}
+    counts = {"seen": 0, "found": 0, "not_found": 0, "fuzzy_miss": 0, "failed": 0, "duplicate": 0, "skipped_id": 0}
 
     # Seed seen base-titles from already-enriched tracks so that version variants
     # detected in a previous run are also caught.
@@ -184,6 +184,13 @@ def run_enrich(
             title = track["title"] or ""
 
             progress.update(task, description=f"{artist} — {title}")
+
+            if detect_db.is_id_placeholder(artist) or detect_db.is_id_placeholder(title):
+                _log(f"skipped_id  {artist} — {title}")
+                if not dry_run:
+                    detect_db.mark_enrich_miss(track_id, "secret")
+                counts["skipped_id"] += 1
+                continue
 
             bk = _base_key(artist, title)
             if bk in seen_base_titles:
@@ -285,6 +292,36 @@ def run_enrich(
                                 f"→  parsed as '{inner_artist}' — '{inner_title}'  (score={score:.2f})"
                             )
 
+            # vs. mashup: "A vs. B — T1 vs. T2" → search each component separately.
+            # First hit enriches the original detected_track; subsequent hits are
+            # stored in split_extras and inserted as new detected_track rows below.
+            split_extras: list[tuple[str, str, dict, float]] = []
+            if not match:
+                for v_title, v_artist in split_mashup_variants(title, artist):
+                    v_artist_q = re.sub(r"\s*[\(\[].*?[\)\]]", "", v_artist).strip()
+                    try:
+                        v_results = beatport.search_tracks(
+                            f"{v_artist_q} {search_query(v_title)}", per_page=10, debug=verbose
+                        )
+                    except bp_api.AuthExpiredError:
+                        raise
+                    except Exception:
+                        v_results = None
+                    if not v_results:
+                        continue
+                    m, s = best_match(v_title, v_artist, v_results, threshold)
+                    if not m:
+                        continue
+                    if not match:
+                        match, score = m, s
+                        if verbose:
+                            progress.log(
+                                f"[green]mashup split:[/green] {artist} — {title}  "
+                                f"→  matched as '{v_artist} — {v_title}'  (score={s:.2f})"
+                            )
+                    else:
+                        split_extras.append((v_title, v_artist, m, s))
+
             if not match:
                 counts["fuzzy_miss"] += 1
                 best_r = results[0]
@@ -304,7 +341,12 @@ def run_enrich(
                     f"would_enrich  {artist} — {title}  →  bp:{meta['beatport_id']}  score={score:.2f}",
                     f"[green]would enrich:[/green] {artist} — {title}  →  {meta['beatport_link']}  (score={score:.2f})",
                 )
-                counts["found"] += 1
+                for v_title, v_artist, v_match, v_score in split_extras:
+                    v_meta = _bp_meta(v_match)
+                    _log(
+                        f"would_enrich  {v_artist} — {v_title}  →  bp:{v_meta['beatport_id']}  score={v_score:.2f}  [mashup split]",
+                    )
+                counts["found"] += 1 + len(split_extras)
                 continue
 
             # Fetch full Beatport catalog detail before upserting so the lean
@@ -336,6 +378,41 @@ def run_enrich(
                 f"[green]enriched:[/green] {artist} — {title}  →  {meta['beatport_link']}",
             )
 
+            # Enrich additional mashup components as new detected_track rows so
+            # both sides of the mashup end up in enriched_tracks.
+            for v_title, v_artist, v_match, v_score in split_extras:
+                v_bk = _base_key(v_artist, v_title)
+                if v_bk in seen_base_titles:
+                    continue
+                v_meta = _bp_meta(v_match)
+                v_extras: dict = {}
+                try:
+                    full_v = beatport.get_track(v_meta["beatport_id"])
+                    if full_v:
+                        label_obj = (full_v.get("release") or {}).get("label") or {}
+                        sub_genre_obj = full_v.get("sub_genre") or {}
+                        v_extras = {
+                            "mix_name": full_v.get("mix_name"),
+                            "label": label_obj.get("name") if isinstance(label_obj, dict) else None,
+                            "catalog_number": full_v.get("catalog_number"),
+                            "isrc": full_v.get("isrc"),
+                            "sub_genre": sub_genre_obj.get("name") if isinstance(sub_genre_obj, dict) else None,
+                            "length_ms": full_v.get("length_ms"),
+                        }
+                except Exception:
+                    pass
+                new_id = detect_db.insert_track(
+                    {"artist": v_artist, "title": v_title},
+                    source=track["source"],
+                )
+                detect_db.upsert_enriched(new_id, v_meta, extras=v_extras)
+                seen_base_titles[v_bk] = v_meta["beatport_id"]
+                counts["found"] += 1
+                _log(
+                    f"enriched  {v_artist} — {v_title}  →  bp:{v_meta['beatport_id']}  score={v_score:.2f}  [mashup split]",
+                    f"[green]enriched:[/green] {v_artist} — {v_title}  →  {v_meta['beatport_link']}  [mashup split]",
+                )
+
     http_client.close()
 
     if not dry_run:
@@ -353,6 +430,7 @@ def run_enrich(
         f"tracks_seen:   {counts['seen']}",
         f"enriched:      {counts['found']}",
         f"duplicate:     {counts['duplicate']}",
+        f"skipped_id:    {counts['skipped_id']}",
         f"no_results:    {counts['not_found']}",
         f"fuzzy_miss:    {counts['fuzzy_miss']}",
         f"search_errors: {counts['failed']}",
@@ -367,6 +445,8 @@ def run_enrich(
     console.print(f"  Enriched:      {counts['found']}")
     if counts["duplicate"]:
         console.print(f"  Duplicate:     {counts['duplicate']}")
+    if counts["skipped_id"]:
+        console.print(f"  Skipped ID:    {counts['skipped_id']}")
     console.print(f"  No results:    {counts['not_found']}")
     console.print(f"  Fuzzy miss:    {counts['fuzzy_miss']}")
     console.print(f"  Search errors: {counts['failed']}")
