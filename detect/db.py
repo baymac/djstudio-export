@@ -12,7 +12,7 @@ from paths import DB_PATH
 _SECRET_ID_RE = _re.compile(r"^ID$", _re.IGNORECASE)
 
 
-def _is_id_placeholder(text: str | None) -> bool:
+def is_id_placeholder(text: str | None) -> bool:
     """True when text is exactly 'ID' (case-insensitive) — an unknown-track sentinel."""
     return bool(text and _SECRET_ID_RE.match(text.strip()))
 
@@ -623,7 +623,7 @@ def insert_track(
         if existing:
             track_id = existing["id"]
         else:
-            outcome = "secret" if (_is_id_placeholder(artist) or _is_id_placeholder(title)) else None
+            outcome = "secret" if (is_id_placeholder(artist) or is_id_placeholder(title)) else None
             cur = con.execute(
                 """INSERT INTO detected_tracks
                    (artist, title, shazam_key, apple_music_id, apple_music_url, source, synced_at, enrich_outcome)
@@ -736,6 +736,7 @@ def get_retry_tracks() -> list[sqlite3.Row]:
         return con.execute(
             """SELECT * FROM detected_tracks
                WHERE enrich_outcome IN ('not_found', 'fuzzy_miss')
+                 AND enriched_track_id IS NULL
                  AND artist IS NOT NULL AND title IS NOT NULL
                ORDER BY id""",
         ).fetchall()
