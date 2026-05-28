@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.4.0] - 2026-05-29
+
+### Added
+- **`dj extension pack <name>`** — zip any Chrome extension under `apps/<name>-extension/` into a Web Store-ready archive at `~/Music/dj/extensions/<name>-extension-v<version>.zip`. Version is read from the manifest; entries use a fixed 1980-01-01 timestamp so re-runs over unchanged sources produce byte-identical zips. Drag the zip onto `chrome://extensions` (Developer mode) to load it, or extract and "Load unpacked". Run `dj extension pack 1001T` to package the bundled 1001tracklists PiP extension.
+
 ## [0.1.3.2] - 2026-05-23
 
 ### Added
