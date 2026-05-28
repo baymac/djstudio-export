@@ -925,6 +925,8 @@ apps/                           Frontend apps exposed via `dj <name>` commands
     extension/                  manifest, background worker, content scripts, icons
     qa-test.js                  Playwright headed end-to-end QA
     screenshot.png              PiP window with active-track highlight
+  extension/                    `dj extension pack <name>` — zip any apps/<name>-extension/
+                                to ~/Music/dj/extensions/ for Chrome Web Store or sharing
 
 vj/                             Audio-reactive visuals for the DJ booth
   cli.py                        `dj vj <name> start/stop` — auto-discovers any

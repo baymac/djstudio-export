@@ -25,6 +25,19 @@ The extension saves the last 20 tracklists locally, so the button reappears if y
 3. Click **Load unpacked** and select the `extension/` folder
 4. The extension is active — no toolbar button, it works purely via injected FABs
 
+## Pack for distribution
+
+```bash
+dj extension pack 1001T
+```
+
+Zips `extension/` to `~/Music/dj/extensions/1001T-extension-v<version>.zip`
+(version read from `manifest.json`). Use the zip for Chrome Web Store upload, for
+sharing, or to load locally: drag the .zip onto `chrome://extensions` with
+Developer mode on, or extract it and **Load unpacked** the resulting folder.
+For a signed `.crx`, point chrome://extensions → **Pack extension** at the
+extracted folder.
+
 ## Keyboard shortcut
 
 `Cmd+Shift+P` (Mac) / `Ctrl+Shift+P` — opens PiP from whichever tab is active:
