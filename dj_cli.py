@@ -25,6 +25,7 @@ from detect.cli import add_detect_subparser, dispatch as dispatch_detect
 from sync.cli import add_sync_subparser, dispatch as dispatch_sync
 from playlist.cli import add_playlist_subparser, dispatch as dispatch_playlist
 from apps.course.cli import run_start as course_start, run_stop as course_stop
+from apps.extension.cli import pack as extension_pack, list_extensions
 from vj.cli import run_start as vj_start, run_stop as vj_stop, list_apps as vj_list_apps
 
 
@@ -63,11 +64,18 @@ Examples:
     vj_p.add_argument("name", nargs="?", help="VJ app directory name under vj/")
     vj_p.add_argument("action", nargs="?", choices=["start", "stop"], help="start or stop")
 
-    return parser, detect_p, sync_p, playlist_p, course_p, vj_p
+    ext_names = list_extensions()
+    ext_help = f"Pack a Chrome extension under apps/<name>-extension/ (available: {', '.join(ext_names) or 'none yet'})"
+    ext_p = sub.add_parser("extension", help=ext_help)
+    ext_sub = ext_p.add_subparsers(dest="extension_action")
+    ext_pack_p = ext_sub.add_parser("pack", help="Zip the extension to ~/Music/dj/extensions/")
+    ext_pack_p.add_argument("name", help="Extension name (e.g. 1001T for apps/1001T-extension/)")
+
+    return parser, detect_p, sync_p, playlist_p, course_p, vj_p, ext_p
 
 
 def main() -> None:
-    parser, detect_p, sync_p, playlist_p, course_p, vj_p = _build_parser()
+    parser, detect_p, sync_p, playlist_p, course_p, vj_p, ext_p = _build_parser()
     args = parser.parse_args()
 
     if args.command == "detect":
@@ -94,6 +102,14 @@ def main() -> None:
             vj_start(args.name)
         else:
             vj_stop(args.name)
+    elif args.command == "extension":
+        if args.extension_action == "pack":
+            extension_pack(args.name)
+        else:
+            ext_p.print_help()
+            names = list_extensions()
+            if names:
+                print(f"\nAvailable extensions: {', '.join(names)}")
     else:
         parser.print_help()
 
