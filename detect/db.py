@@ -236,6 +236,46 @@ def migrate() -> None:
             ON shazam_slices(session_id)
         """)
 
+        # ── DJ sets (any curated tracklist) ───────────────────────────────────
+        # A "set" is any named tracklist regardless of where it lives — a
+        # Beatport chart, a Mixcloud upload, an impromptu rekordbox set, etc.
+        # Identity is (name, type); `type` names the platform/context. One row
+        # per set; the ordered track list lives in the dj_set_tracks junction.
+        #
+        # Modelled like beatport_playlists/_tracks, but the junction keys on
+        # beatport_id (not enriched_tracks.id) — same choice as
+        # enriched_tracks_analysis, so the full row is a query-time join
+        # (dj_set_tracks JOIN enriched_tracks USING(beatport_id)). beatport_id is
+        # our canonical track identity across the library; no hard FK to
+        # enriched_tracks because its UNIQUE(beatport_id) index is created
+        # conditionally, so we keep beatport_id as a plain indexed column.
+        con.executescript("""
+            CREATE TABLE IF NOT EXISTS dj_sets (
+                id         INTEGER PRIMARY KEY AUTOINCREMENT,
+                name       TEXT    NOT NULL,
+                type       TEXT    NOT NULL,
+                created_at TEXT    NOT NULL,
+                updated_at TEXT    NOT NULL,
+                UNIQUE(name, type)
+            );
+
+            CREATE TABLE IF NOT EXISTS dj_set_tracks (
+                set_id      INTEGER NOT NULL REFERENCES dj_sets(id) ON DELETE CASCADE,
+                beatport_id INTEGER NOT NULL,
+                position    INTEGER NOT NULL,
+                added_at    TEXT    NOT NULL,
+                PRIMARY KEY (set_id, beatport_id)
+            );
+
+            -- "which sets is this track in?" + "how many sets contain it?":
+            -- leading beatport_id so both are index-only lookups.
+            CREATE INDEX IF NOT EXISTS idx_dj_set_tracks_track
+                ON dj_set_tracks(beatport_id);
+            -- one track per position within a set (preserves tracklist order).
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_dj_set_tracks_pos
+                ON dj_set_tracks(set_id, position);
+        """)
+
         # Additive migration: full Beatport catalog detail on the lean table
         # (added after enriched_tracks shipped).
         for _col, _typ in _BEATPORT_EXTRAS_COLS:
@@ -243,6 +283,11 @@ def migrate() -> None:
 
         # Additive migration: duplicate count on enrich_runs.
         _add_column_if_missing(con, "enrich_runs", "duplicate", "INTEGER DEFAULT 0")
+
+        # Additive migration: build provenance for sets curated by build_set.py
+        # (mood, duration, count, genres, date filter, archetype curve) as JSON.
+        # `dj_sets.type` carries the archetype key; this carries everything else.
+        _add_column_if_missing(con, "dj_sets", "params_json", "TEXT")
 
         # Additive migration: flip the FK direction so many detected_tracks can
         # share one enriched_tracks row without copying data.
@@ -1158,3 +1203,267 @@ def upsert_analysis(beatport_id: int, fields: dict) -> None:
                 ON CONFLICT(beatport_id) {on_conflict}""",
             tuple(cols.values()),
         )
+
+
+# ── DJ sets (any curated tracklist: beatport chart / mixcloud / rekordbox …) ──
+#
+# Two-level model: dj_sets (header, keyed on name+type) + dj_set_tracks (ordered
+# junction on beatport_id). Edits always rewrite the whole junction for a set —
+# at ~10-30 tracks that's trivial and sidesteps every position-collision corner
+# case (the UNIQUE(set_id, position) index makes incremental shifts fragile).
+
+def _dedup_keep_order(beatport_ids: list[int]) -> list[int]:
+    seen: set[int] = set()
+    return [b for b in beatport_ids if not (b in seen or seen.add(b))]
+
+
+def _get_or_create_set_id(con: sqlite3.Connection, name: str, type: str) -> int:
+    now = _now()
+    con.execute(
+        """INSERT INTO dj_sets (name, type, created_at, updated_at)
+           VALUES (?, ?, ?, ?)
+           ON CONFLICT(name, type) DO UPDATE SET updated_at = excluded.updated_at""",
+        (name, type, now, now),
+    )
+    return con.execute(
+        "SELECT id FROM dj_sets WHERE name = ? AND type = ?", (name, type)
+    ).fetchone()[0]
+
+
+def _set_id(con: sqlite3.Connection, name: str, type: str) -> int:
+    row = con.execute(
+        "SELECT id FROM dj_sets WHERE name = ? AND type = ?", (name, type)
+    ).fetchone()
+    if row is None:
+        raise KeyError(f"no set named {name!r} of type {type!r}")
+    return row[0]
+
+
+def _rewrite_tracks(con: sqlite3.Connection, set_id: int,
+                    ordered_ids: list[int]) -> None:
+    """Replace a set's entire ordered track list (positions renumbered 1..N)."""
+    now = _now()
+    con.execute("DELETE FROM dj_set_tracks WHERE set_id = ?", (set_id,))
+    con.executemany(
+        """INSERT INTO dj_set_tracks (set_id, beatport_id, position, added_at)
+           VALUES (?, ?, ?, ?)""",
+        [(set_id, bid, pos, now) for pos, bid in enumerate(ordered_ids, 1)],
+    )
+    con.execute("UPDATE dj_sets SET updated_at = ? WHERE id = ?", (now, set_id))
+
+
+def _ordered_ids(con: sqlite3.Connection, set_id: int) -> list[int]:
+    return [r[0] for r in con.execute(
+        "SELECT beatport_id FROM dj_set_tracks WHERE set_id = ? ORDER BY position",
+        (set_id,),
+    )]
+
+
+def record_set(name: str, type: str, beatport_ids: list[int]) -> int:
+    """Upsert the (name, type) set and replace its ordered track list.
+
+    `beatport_ids` is stored in order (position 1..N). Re-recording a set fully
+    replaces its tracks, so the row always reflects the latest tracklist.
+    Returns the set's id. Duplicate ids in the input are dropped (first wins),
+    since a track appears at most once per set.
+    """
+    with _connect() as con:
+        set_id = _get_or_create_set_id(con, name, type)
+        _rewrite_tracks(con, set_id, _dedup_keep_order(beatport_ids))
+    return set_id
+
+
+def record_built_set(name: str, archetype: str, beatport_ids: list[int],
+                     params: dict) -> int:
+    """Upsert a set built by build_set.py and persist its build provenance.
+
+    `archetype` is stored as the set's `type` (so the same name can exist per
+    archetype, and rebuilding the same name+archetype REPLACES it). `params` is
+    JSON-encoded into `dj_sets.params_json` — mood, duration, count, genres, date
+    filter and the curve — so the set is self-describing and reproducible.
+    Returns the set id.
+    """
+    import json
+    with _connect() as con:
+        set_id = _get_or_create_set_id(con, name, archetype)
+        con.execute(
+            "UPDATE dj_sets SET params_json = ?, updated_at = ? WHERE id = ?",
+            (json.dumps(params), _now(), set_id),
+        )
+        _rewrite_tracks(con, set_id, _dedup_keep_order(beatport_ids))
+    return set_id
+
+
+# ----- mutating a stored set in place -------------------------------------
+
+def add_track_to_set(name: str, type: str, beatport_id: int,
+                     position: int | None = None) -> None:
+    """Insert one track into a set (creating the set if needed).
+
+    `position` is 1-based; None appends to the end. If the track is already in
+    the set it is moved to the requested position (or left in place when None).
+    """
+    with _connect() as con:
+        set_id = _get_or_create_set_id(con, name, type)
+        ids = [b for b in _ordered_ids(con, set_id) if b != beatport_id]
+        idx = len(ids) if position is None else max(0, min(len(ids), position - 1))
+        ids.insert(idx, beatport_id)
+        _rewrite_tracks(con, set_id, ids)
+
+
+def remove_track_from_set(name: str, type: str, beatport_id: int) -> bool:
+    """Drop a track from a set and close the position gap. False if absent."""
+    with _connect() as con:
+        set_id = _set_id(con, name, type)
+        ids = _ordered_ids(con, set_id)
+        if beatport_id not in ids:
+            return False
+        _rewrite_tracks(con, set_id, [b for b in ids if b != beatport_id])
+        return True
+
+
+def move_track_in_set(name: str, type: str, beatport_id: int,
+                      position: int) -> None:
+    """Reorder one track to a new 1-based position within its set."""
+    with _connect() as con:
+        set_id = _set_id(con, name, type)
+        ids = _ordered_ids(con, set_id)
+        if beatport_id not in ids:
+            raise KeyError(f"track {beatport_id} not in set {name!r}")
+        ids.remove(beatport_id)
+        idx = max(0, min(len(ids), position - 1))
+        ids.insert(idx, beatport_id)
+        _rewrite_tracks(con, set_id, ids)
+
+
+def reorder_set(name: str, type: str, beatport_ids: list[int]) -> None:
+    """Set the full ordering explicitly. Must be a permutation of current ids."""
+    with _connect() as con:
+        set_id = _set_id(con, name, type)
+        current = set(_ordered_ids(con, set_id))
+        new = _dedup_keep_order(beatport_ids)
+        if set(new) != current:
+            raise ValueError("reorder_set requires the same track set, reordered")
+        _rewrite_tracks(con, set_id, new)
+
+
+def rename_set(name: str, type: str, new_name: str) -> None:
+    """Rename a set (its type and tracks are unchanged)."""
+    with _connect() as con:
+        set_id = _set_id(con, name, type)
+        con.execute(
+            "UPDATE dj_sets SET name = ?, updated_at = ? WHERE id = ?",
+            (new_name, _now(), set_id),
+        )
+
+
+def delete_set(name: str, type: str) -> bool:
+    """Delete a set and its tracks (ON DELETE CASCADE). False if it didn't exist."""
+    with _connect() as con:
+        row = con.execute(
+            "SELECT id FROM dj_sets WHERE name = ? AND type = ?", (name, type)
+        ).fetchone()
+        if row is None:
+            return False
+        con.execute("DELETE FROM dj_sets WHERE id = ?", (row[0],))
+        return True
+
+
+def list_sets() -> list[sqlite3.Row]:
+    """All stored sets with their track counts, newest-updated first."""
+    with _connect() as con:
+        return con.execute(
+            """SELECT s.name, s.type, s.created_at, s.updated_at,
+                      COUNT(st.beatport_id) AS track_count
+               FROM dj_sets s
+               LEFT JOIN dj_set_tracks st ON st.set_id = s.id
+               GROUP BY s.id
+               ORDER BY s.updated_at DESC""",
+        ).fetchall()
+
+
+def tracks_in_set(name: str, type: str) -> list[sqlite3.Row]:
+    """Ordered tracks in a set, joined to enriched metadata where available."""
+    with _connect() as con:
+        return con.execute(
+            """SELECT st.position, st.beatport_id, e.artist, e.title,
+                      e.bpm, e.key, e.genre
+               FROM dj_set_tracks st
+               JOIN dj_sets s ON s.id = st.set_id
+               LEFT JOIN enriched_tracks e ON e.beatport_id = st.beatport_id
+               WHERE s.name = ? AND s.type = ?
+               ORDER BY st.position""",
+            (name, type),
+        ).fetchall()
+
+
+def tracks_in_set_id(set_id: int) -> list[sqlite3.Row]:
+    """Ordered tracks in a set by its id (the handle build_set.py returns), joined
+    to enriched metadata. Used by ad-hoc queries and the export tool."""
+    with _connect() as con:
+        return con.execute(
+            """SELECT st.position, st.beatport_id, e.artist, e.title,
+                      e.bpm, e.key, e.genre, e.length_ms
+               FROM dj_set_tracks st
+               LEFT JOIN enriched_tracks e ON e.beatport_id = st.beatport_id
+               WHERE st.set_id = ?
+               ORDER BY st.position""",
+            (set_id,),
+        ).fetchall()
+
+
+def get_set(set_id: int) -> sqlite3.Row | None:
+    """The dj_sets header row (name, type/archetype, params_json, timestamps)."""
+    with _connect() as con:
+        return con.execute(
+            "SELECT id, name, type, created_at, updated_at, params_json "
+            "FROM dj_sets WHERE id = ?",
+            (set_id,),
+        ).fetchone()
+
+
+def sets_for_track(beatport_id: int) -> list[sqlite3.Row]:
+    """Every set a track appears in (name, type, its position there)."""
+    with _connect() as con:
+        return con.execute(
+            """SELECT s.name, s.type, st.position
+               FROM dj_set_tracks st
+               JOIN dj_sets s ON s.id = st.set_id
+               WHERE st.beatport_id = ?
+               ORDER BY s.type, s.name""",
+            (beatport_id,),
+        ).fetchall()
+
+
+def track_set_count(beatport_id: int) -> int:
+    """How many sets a track appears in (one row per set, so a plain count)."""
+    with _connect() as con:
+        return con.execute(
+            "SELECT COUNT(*) FROM dj_set_tracks WHERE beatport_id = ?",
+            (beatport_id,),
+        ).fetchone()[0]
+
+
+def used_beatport_ids(exclude_name: str | None = None,
+                      exclude_type: str | None = None) -> set[int]:
+    """Every beatport_id that appears in ANY stored set — the "already used in a
+    past set" exclusion list for build_set's --exclude-used.
+
+    When rebuilding a set in place (same name+archetype REPLACES it), pass that
+    set's `exclude_name`+`exclude_type` so its own current tracks don't count as
+    "used elsewhere" and block the rebuild.
+    """
+    with _connect() as con:
+        if exclude_name is not None and exclude_type is not None:
+            rows = con.execute(
+                """SELECT DISTINCT st.beatport_id
+                   FROM dj_set_tracks st
+                   JOIN dj_sets s ON s.id = st.set_id
+                   WHERE NOT (s.name = ? AND s.type = ?)""",
+                (exclude_name, exclude_type),
+            ).fetchall()
+        else:
+            rows = con.execute(
+                "SELECT DISTINCT beatport_id FROM dj_set_tracks"
+            ).fetchall()
+        return {r[0] for r in rows}
