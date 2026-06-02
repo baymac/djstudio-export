@@ -1,0 +1,37 @@
+# dj pipeline — sources → enriched library → analysis. Source: README "Pipeline at a glance".
+# Render: d2 --theme 0 --dark-theme 200 --pad 20 pipeline.d2 pipeline.svg
+
+direction: down
+
+apple: "Apple Music / Spotify\n(playlists, library)" {
+  shape: oval
+}
+audio: "Audio sources\nInstagram · YouTube · Mixcloud · SoundCloud\nRadio Garden · Podbean · Reddit · topdjmixes · 1001tracklists" {
+  shape: oval
+}
+bp_pl: "Your Beatport playlists" {
+  shape: oval
+}
+
+sync_tracks: "sync_tracks\n+ sync_playlist_tracks" {
+  shape: cylinder
+}
+detected: "detected_tracks" {
+  shape: cylinder
+}
+enriched: "enriched_tracks\nbasic Beatport fields + label / ISRC / mix_name / sub_genre / length_ms" {
+  shape: cylinder
+  style.bold: true
+}
+analysis: "enriched_tracks_analysis\nmik_key, mik_nrg, per-stem RMS,\nanalysis_json (energy segments + 1Hz stem curves + per-segment RMS) + dj_studio_at" {
+  shape: cylinder
+}
+
+apple -> sync_tracks: "dj sync music|spotify"
+sync_tracks -> enriched: "dj enrich --sync"
+audio -> detected: "dj detect <platform>"
+detected -> enriched: "dj enrich --detect"
+bp_pl -> enriched: "dj sync beatport\n(pull straight in)"
+enriched -> analysis: "dj enrich analyse\n(drives DJ Studio's SDK headlessly → our DB)" {
+  style.bold: true
+}

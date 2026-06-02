@@ -180,7 +180,7 @@ def migrate() -> None:
         # Lean linking-table keyed on beatport_id. All Beatport-derived fields
         # (artist/title/bpm/key/genre/mix_name/label/...) live on `enriched_tracks`
         # and are joined in at query time.
-        # A row exists in this table only after `dj detect studio-analyse` has
+        # A row exists in this table only after `dj enrich analyse` has
         # populated it (Stage 5). The SDK driver writes directly here — DJ
         # Studio's filesystem is never touched.
         con.execute("""
@@ -842,47 +842,7 @@ def upsert_enriched(detected_track_id: int, meta: dict, extras: dict | None = No
         title = row["title"] if row else None
         apple_url = row["apple_music_url"] if row else None
 
-        con.execute(
-            """INSERT INTO enriched_tracks
-               (beatport_id, beatport_link, bpm, key, genre,
-                release_date, apple_music_url, artist, title, enriched_at,
-                mix_name, label, catalog_number, isrc, sub_genre, length_ms)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-               ON CONFLICT(beatport_id) DO UPDATE SET
-                 beatport_link   = excluded.beatport_link,
-                 bpm             = excluded.bpm,
-                 key             = excluded.key,
-                 genre           = excluded.genre,
-                 release_date    = excluded.release_date,
-                 apple_music_url = COALESCE(excluded.apple_music_url, enriched_tracks.apple_music_url),
-                 artist          = COALESCE(excluded.artist, enriched_tracks.artist),
-                 title           = COALESCE(excluded.title, enriched_tracks.title),
-                 enriched_at     = excluded.enriched_at,
-                 mix_name        = COALESCE(excluded.mix_name,       enriched_tracks.mix_name),
-                 label           = COALESCE(excluded.label,          enriched_tracks.label),
-                 catalog_number  = COALESCE(excluded.catalog_number, enriched_tracks.catalog_number),
-                 isrc            = COALESCE(excluded.isrc,           enriched_tracks.isrc),
-                 sub_genre       = COALESCE(excluded.sub_genre,      enriched_tracks.sub_genre),
-                 length_ms       = COALESCE(excluded.length_ms,      enriched_tracks.length_ms)""",
-            (
-                meta.get("beatport_id"),
-                meta.get("beatport_link"),
-                meta.get("bpm"),
-                meta.get("key"),
-                meta.get("genre"),
-                meta.get("release_date"),
-                apple_url,
-                artist,
-                title,
-                _now(),
-                extras.get("mix_name"),
-                extras.get("label"),
-                extras.get("catalog_number"),
-                extras.get("isrc"),
-                extras.get("sub_genre"),
-                extras.get("length_ms"),
-            ),
-        )
+        _upsert_enriched_row(con, meta, extras, artist, title, apple_url)
         # Link this detected track to the enriched row (or the pre-existing one
         # for the same beatport_id that came in via sync-beatport).
         con.execute("""
@@ -890,6 +850,69 @@ def upsert_enriched(detected_track_id: int, meta: dict, extras: dict | None = No
             SET enriched_track_id = (SELECT id FROM enriched_tracks WHERE beatport_id = ?)
             WHERE id = ?
         """, (beatport_id, detected_track_id))
+
+
+def upsert_enriched_values(
+    meta: dict,
+    artist: str | None,
+    title: str | None,
+    *,
+    extras: dict | None = None,
+    apple_url: str | None = None,
+) -> None:
+    """Upsert one `enriched_tracks` row from explicit values (no detected_tracks link).
+
+    Used by `dj enrich --sync`, whose candidate rows live in `sync_tracks`, not
+    `detected_tracks`. Same dedup-by-beatport_id semantics as `upsert_enriched`;
+    the sync adapter records the back-link (sync_tracks.enriched_beatport_id) itself.
+    """
+    with _connect() as con:
+        _upsert_enriched_row(con, meta, extras or {}, artist, title, apple_url)
+
+
+def _upsert_enriched_row(con, meta: dict, extras: dict, artist, title, apple_url) -> None:
+    """INSERT … ON CONFLICT(beatport_id) the enriched_tracks row. Single-sourced SQL."""
+    con.execute(
+        """INSERT INTO enriched_tracks
+           (beatport_id, beatport_link, bpm, key, genre,
+            release_date, apple_music_url, artist, title, enriched_at,
+            mix_name, label, catalog_number, isrc, sub_genre, length_ms)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+           ON CONFLICT(beatport_id) DO UPDATE SET
+             beatport_link   = excluded.beatport_link,
+             bpm             = excluded.bpm,
+             key             = excluded.key,
+             genre           = excluded.genre,
+             release_date    = excluded.release_date,
+             apple_music_url = COALESCE(excluded.apple_music_url, enriched_tracks.apple_music_url),
+             artist          = COALESCE(excluded.artist, enriched_tracks.artist),
+             title           = COALESCE(excluded.title, enriched_tracks.title),
+             enriched_at     = excluded.enriched_at,
+             mix_name        = COALESCE(excluded.mix_name,       enriched_tracks.mix_name),
+             label           = COALESCE(excluded.label,          enriched_tracks.label),
+             catalog_number  = COALESCE(excluded.catalog_number, enriched_tracks.catalog_number),
+             isrc            = COALESCE(excluded.isrc,           enriched_tracks.isrc),
+             sub_genre       = COALESCE(excluded.sub_genre,      enriched_tracks.sub_genre),
+             length_ms       = COALESCE(excluded.length_ms,      enriched_tracks.length_ms)""",
+        (
+            meta.get("beatport_id"),
+            meta.get("beatport_link"),
+            meta.get("bpm"),
+            meta.get("key"),
+            meta.get("genre"),
+            meta.get("release_date"),
+            apple_url,
+            artist,
+            title,
+            _now(),
+            extras.get("mix_name"),
+            extras.get("label"),
+            extras.get("catalog_number"),
+            extras.get("isrc"),
+            extras.get("sub_genre"),
+            extras.get("length_ms"),
+        ),
+    )
 
 
 def link_detected_to_enriched(detected_track_id: int, beatport_id: int) -> bool:
@@ -986,6 +1009,18 @@ def upsert_beatport_playlist(beatport_id: int, name: str) -> int:
         return row["id"]
 
 
+def list_beatport_playlists() -> list[sqlite3.Row]:
+    """Synced Beatport playlists with their local track counts (for `playlist list`)."""
+    with _connect() as con:
+        return con.execute(
+            """SELECT bp.beatport_id, bp.name, COUNT(bpt.enriched_track_id) AS track_count
+               FROM beatport_playlists bp
+               LEFT JOIN beatport_playlist_tracks bpt ON bpt.playlist_id = bp.id
+               GROUP BY bp.id
+               ORDER BY bp.name""",
+        ).fetchall()
+
+
 def insert_beatport_track(
     artist: str,
     title: str,
@@ -1078,7 +1113,7 @@ ANALYSIS_TABLE = "enriched_tracks_analysis"
 
 
 def get_studio_analyse_pending(*, force: bool = False) -> list[sqlite3.Row]:
-    """All enriched tracks with a beatport_id. The caller (`dj detect studio-analyse`)
+    """All enriched tracks with a beatport_id. The caller (`dj enrich analyse`)
     filters client-side: tracks already in enriched_tracks_analysis are skipped
     unless `force=True`.
 
@@ -1111,7 +1146,7 @@ def mark_pipeline_done(beatport_id: int, column: str) -> None:
 
 def existing_analysis_beatport_ids() -> set[int]:
     """Return the set of beatport_ids that already have a row in
-    enriched_tracks_analysis. Used by `dj detect studio-analyse` to skip
+    enriched_tracks_analysis. Used by `dj enrich analyse` to skip
     work that was already done on a previous run."""
     with _connect() as con:
         return {r[0] for r in con.execute(
@@ -1132,7 +1167,7 @@ _ANALYSIS_COLS = (
 def upsert_analysis(beatport_id: int, fields: dict) -> None:
     """Insert or update one row in enriched_tracks_analysis.
 
-    Called by `dj detect studio-analyse` (the creation point) and any future
+    Called by `dj enrich analyse` (the creation point) and any future
     stage that produces analysis data. Only the keys in `_ANALYSIS_COLS` are
     accepted; unknowns are ignored. `dj_studio_at` is stamped to NOW on the
     initial insert.

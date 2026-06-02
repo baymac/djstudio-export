@@ -1,0 +1,66 @@
+"""connections/musickit.py — pure AppleScript builders (no Music.app needed)."""
+import connections.musickit as mk
+
+
+def test_delete_applescript_targets_user_playlist_by_name():
+    script = mk.build_delete_playlist_applescript("Summer Mix")
+    assert 'every user playlist whose name is "Summer Mix"' in script
+    assert "delete p" in script
+    # Deletes the container only — returns how many playlists matched.
+    assert "return n as string" in script
+
+
+def test_delete_applescript_escapes_quotes():
+    script = mk.build_delete_playlist_applescript('My "Best" Set')
+    assert '\\"Best\\"' in script
+
+
+def test_create_playlist_uses_album_tiebreaker_when_known():
+    script = mk.build_create_playlist_applescript("Set", [
+        {"title": "Glue", "artist": "Bicep", "album": "Bicep"},
+    ])
+    # name+artist filter, plus an album tiebreaker that never drops item 1.
+    assert 'whose name is "Glue" and artist is "Bicep"' in script
+    assert "set chosen to item 1 of ms" in script
+    assert '(album of c) is "Bicep"' in script
+
+
+def test_create_playlist_no_album_block_without_album():
+    script = mk.build_create_playlist_applescript("Set", [
+        {"title": "Opal", "artist": "Bicep"},  # no album → no tiebreaker loop
+    ])
+    assert "album of" not in script
+    assert "set chosen to item 1 of ms" in script
+
+
+def test_create_playlist_prefers_persistent_id_then_falls_back():
+    script = mk.build_create_playlist_applescript("Set", [
+        {"title": "Glue", "artist": "Bicep", "native_persistent_id": "41EA5F8B718954FE"},
+    ])
+    # Exact persistent-id match first, name+artist as fallback (chosen still missing).
+    assert 'whose persistent ID is "41EA5F8B718954FE"' in script
+    assert "if chosen is missing value then" in script
+    assert 'whose name is "Glue" and artist is "Bicep"' in script
+
+
+def test_create_playlist_no_persistent_block_without_id():
+    script = mk.build_create_playlist_applescript("Set", [{"title": "Opal", "artist": "Bicep"}])
+    assert "persistent ID is" not in script
+
+
+def test_read_persistent_ids_parses_tab_lines(monkeypatch):
+    monkeypatch.setattr(mk, "_run_osascript",
+                        lambda *a, **k: "AAA\tMissing U\nBBB\tDopamine\n")
+    assert mk.read_playlist_persistent_ids("Old anthems") == [("AAA", "Missing U"), ("BBB", "Dopamine")]
+
+
+def test_read_persistent_ids_ambiguous_returns_none(monkeypatch):
+    monkeypatch.setattr(mk, "_run_osascript", lambda *a, **k: "AMBIGUOUS")
+    assert mk.read_playlist_persistent_ids("Chill") is None
+
+
+def test_read_persistent_ids_swallows_applescript_error(monkeypatch):
+    def boom(*a, **k):
+        raise RuntimeError("osascript failed")
+    monkeypatch.setattr(mk, "_run_osascript", boom)
+    assert mk.read_playlist_persistent_ids("Gone") is None

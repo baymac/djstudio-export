@@ -25,7 +25,7 @@ def push_to_beatport(
         console.print("[yellow]No tracks to push.[/yellow]")
         return
 
-    from sync.sync import make_bp_client
+    from connections.beatport import make_bp_client
 
     beatport, client = make_bp_client()
     try:
@@ -94,7 +94,7 @@ def push_to_beatport_chart(
         console.print("[yellow]No tracks to push.[/yellow]")
         return
 
-    from sync.sync import make_bp_client
+    from connections.beatport import make_bp_client
 
     beatport, client = make_bp_client()
     try:

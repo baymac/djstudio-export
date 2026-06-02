@@ -2,7 +2,8 @@
 """DJ CLI — unified tool:
 
   dj detect ...          Detect tracks from Instagram/radio/Mixcloud/YouTube/Podbean
-  dj sync ...            Sync Apple Music → Beatport playlists
+  dj sync ...            Capture Apple Music/Spotify/Beatport → enriched library
+  dj enrich ...          Enrich detected + synced tracks → Beatport metadata + DJ Studio analysis
   dj export ...          Push a stored set, or a SQL-curated subset, to Beatport / rekordbox
 
 Beatport auth is handled transparently by connections/beatport.resolve_access_token
@@ -23,6 +24,7 @@ load_dotenv(Path(__file__).parent / ".env", override=True)
 
 from detect.cli import add_detect_subparser, dispatch as dispatch_detect
 from sync.cli import add_sync_subparser, dispatch as dispatch_sync
+from enrich.cli import add_enrich_subparser, dispatch as dispatch_enrich
 from export.cli import add_export_subparser, dispatch as dispatch_export
 from apps.course.cli import run_start as course_start, run_stop as course_stop
 from apps.extension.cli import pack as extension_pack, list_extensions
@@ -38,9 +40,15 @@ def _build_parser():
 Examples:
   uv run dj_cli.py detect instagram https://www.instagram.com/p/abc123/
   uv run dj_cli.py detect mixcloud https://www.mixcloud.com/djname/mixname/
-  uv run dj_cli.py detect enrich --dry-run
 
-  uv run dj_cli.py sync music-beatport sync --library
+  uv run dj_cli.py sync music                 # capture all Apple Music playlists → sync_tracks
+  uv run dj_cli.py sync beatport               # Beatport playlists → enriched_tracks (checkpoint)
+  uv run dj_cli.py sync music playlist delete --playlists   # delete playlists from the app (dj.db kept)
+
+  uv run dj_cli.py enrich                       # enrich detected + synced tracks → enriched_tracks
+  uv run dj_cli.py enrich --detect --dry-run    # only detected tracks
+  uv run dj_cli.py enrich --sync                # only synced tracks
+  uv run dj_cli.py enrich analyse               # DJ Studio SDK analysis → enriched_tracks_analysis
 
   uv run dj_cli.py export set 42 --to bp_chart
   uv run dj_cli.py export beatport --query "SELECT beatport_id FROM enriched_tracks WHERE genre='Tech House' AND bpm BETWEEN 124 AND 128" --name "Peak Tech House"
@@ -51,6 +59,7 @@ Examples:
 
     detect_p = add_detect_subparser(sub)
     sync_p = add_sync_subparser(sub)
+    enrich_p = add_enrich_subparser(sub)
     export_p = add_export_subparser(sub)
 
     course_p = sub.add_parser("course", help="Start/stop the offline course viewer")
@@ -71,17 +80,19 @@ Examples:
     ext_pack_p = ext_sub.add_parser("pack", help="Zip the extension to ~/Music/dj/extensions/")
     ext_pack_p.add_argument("name", help="Extension name (e.g. 1001T for apps/1001T-extension/)")
 
-    return parser, detect_p, sync_p, export_p, course_p, vj_p, ext_p
+    return parser, detect_p, sync_p, enrich_p, export_p, course_p, vj_p, ext_p
 
 
 def main() -> None:
-    parser, detect_p, sync_p, export_p, course_p, vj_p, ext_p = _build_parser()
+    parser, detect_p, sync_p, enrich_p, export_p, course_p, vj_p, ext_p = _build_parser()
     args = parser.parse_args()
 
     if args.command == "detect":
         dispatch_detect(args, detect_p)
     elif args.command == "sync":
         dispatch_sync(args, sync_p)
+    elif args.command == "enrich":
+        dispatch_enrich(args, enrich_p)
     elif args.command == "export":
         dispatch_export(args, export_p)
     elif args.command == "course":

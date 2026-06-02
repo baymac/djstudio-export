@@ -1469,7 +1469,8 @@ Examples:
   uv run dj_cli.py detect reddit https://www.reddit.com/r/HypeTracks/comments/XXXXX/
   uv run dj_cli.py detect 1001tracklists https://www.1001tracklists.com/tracklist/XXXXX/
   uv run dj_cli.py detect gems --source beatport --genre "Tech House" --count 10
-  uv run dj_cli.py detect enrich
+
+  (enrich detected tracks afterwards with: uv run dj_cli.py enrich --detect)
 """,
     )
     sub = detect_p.add_subparsers(dest="detect_command")
@@ -1655,51 +1656,6 @@ Examples:
         help="Fuzzy match threshold for keeping a detected track (default: 0.75)",
     )
 
-    # enrich
-    enrich_p = sub.add_parser(
-        "enrich",
-        help="Enrich detected tracks with Beatport metadata (bpm, key, genre, release_date)",
-    )
-    enrich_p.add_argument("--dry-run", action="store_true",
-                          help="Show what would be enriched without writing to DB")
-    enrich_p.add_argument("--limit", type=int, default=0, metavar="N",
-                          help="Stop after N tracks (0 = no limit)")
-    enrich_p.add_argument("--verbose", "-v", action="store_true",
-                          help="Print Beatport search details")
-    enrich_p.add_argument("--threshold", type=float, default=0.72, metavar="F",
-                          help="Fuzzy match threshold 0-1 (default: 0.72)")
-    enrich_p.add_argument("--retry-misses", "-r", action="store_true",
-                          help="Retry tracks that previously had no results or fuzzy miss")
-
-    # sync-beatport
-    sb_p = sub.add_parser(
-        "sync-beatport",
-        help="Pull Beatport playlist tracks into enriched_tracks (incremental)",
-    )
-    sb_p.add_argument("--playlist", "-p", default=None, metavar="NAME",
-                      help="Sync only this playlist (exact name). Omit to sync all.")
-    sb_p.add_argument("--dry-run", action="store_true",
-                      help="Show what would be added without writing")
-    sb_p.add_argument("--verbose", "-v", action="store_true",
-                      help="Print each track as it is added")
-    sb_p.add_argument("--limit", type=int, default=0, metavar="N",
-                      help="Stop after adding N new tracks (0 = no limit)")
-
-    # studio-analyse
-    sa_p = sub.add_parser(
-        "studio-analyse",
-        help="Run DJ Studio's SDK analysis and write directly to enriched_tracks_analysis (no DJ Studio filesystem writes).",
-    )
-    sa_p.add_argument("--ids", default=None, metavar="ID[,ID...]",
-                      help="Comma-separated beatport IDs to analyze. When set, --limit is ignored.")
-    sa_p.add_argument("--limit", type=int, default=0, metavar="N",
-                      help="Stop after N tracks (0 = no limit)")
-    sa_p.add_argument("--verbose", "-v", action="store_true")
-    sa_p.add_argument("--force", action="store_true",
-                      help="Re-process tracks even if a row already exists in enriched_tracks_analysis")
-    sa_p.add_argument("--retry-failed", action="store_true",
-                      help="Ignore the hard-failure sidecar and re-attempt tracks that previously hit MAX_FAILURE_ATTEMPTS")
-
     # spotify
     sp_p = sub.add_parser("spotify", help="Import tracks from a Spotify playlist into detected_tracks")
     sp_p.add_argument("url_or_name", help="Spotify playlist URL or playlist name to search for")
@@ -1858,9 +1814,10 @@ def dispatch(args, detect_p: argparse.ArgumentParser) -> None:
         if not args.dry_run:
             prior = find_session(url)
             if prior:
+                n_tracks = len(tracks_for_session(prior["id"]))
                 console.print(
                     f"[yellow]Already scanned:[/yellow] {prior['title'] or url} "
-                    f"(session #{prior['id']}, {prior['track_count']} tracks)"
+                    f"(session #{prior['id']}, {n_tracks} track(s))"
                 )
                 if not _confirm("Scan again?", default=False):
                     sys.exit(0)
@@ -2335,37 +2292,6 @@ def dispatch(args, detect_p: argparse.ArgumentParser) -> None:
             sys.exit(0)
         delete_session(args.session_id)
         console.print(f"[green]✓[/green] Deleted session #{args.session_id} and {n_tracks} track(s).")
-
-    elif cmd == "enrich":
-        from detect.enrich import run_enrich
-        run_enrich(
-            dry_run=args.dry_run,
-            limit=args.limit,
-            verbose=args.verbose,
-            threshold=args.threshold,
-            retry_misses=args.retry_misses,
-        )
-
-    elif cmd == "sync-beatport":
-        from detect.sync_beatport import run_sync_beatport
-        run_sync_beatport(dry_run=args.dry_run, verbose=args.verbose, limit=args.limit, playlist=args.playlist)
-
-    elif cmd == "studio-analyse":
-        from detect.studio_analyse import run_studio_analyse
-        ids = None
-        if args.ids:
-            try:
-                ids = [int(x.strip()) for x in args.ids.split(",") if x.strip()]
-            except ValueError:
-                console.print(f"[red]--ids must be comma-separated integers, got: {args.ids}[/red]")
-                return
-        run_studio_analyse(
-            ids=ids,
-            limit=args.limit,
-            verbose=args.verbose,
-            force=args.force,
-            retry_failed=args.retry_failed,
-        )
 
     elif cmd == "fix-session":
         _cmd_fix_session(args)

@@ -21,7 +21,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from sync import db, sync
+from connections.beatport import make_bp_client
 
 
 def parse_track_id(value: str) -> int:
@@ -58,8 +58,7 @@ def main() -> None:
     print(f"Track ID : {track_id}")
     print(f"Playlist : {playlist_name!r}")
 
-    db.init_db()
-    beatport, http_client = sync.make_bp_client()
+    beatport, http_client = make_bp_client()
 
     try:
         playlists = beatport.list_my_playlists()

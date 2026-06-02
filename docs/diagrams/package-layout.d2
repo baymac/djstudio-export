@@ -1,0 +1,82 @@
+# dj package layout — top-level modules and key files. Source: README "Package layout".
+# Render: d2 --theme 0 --dark-theme 200 --pad 20 package-layout.d2 package-layout.svg
+
+direction: right
+
+entry: "dj_cli.py\nCLI entrypoint — detect / sync / enrich / export / course / vj" {
+  shape: page
+}
+
+enrich: "enrich/  — enrichment + DJ Studio analysis" {
+  cli: "cli.py — dj enrich [--detect|--sync]  +  dj enrich analyse"
+  engine: "engine.py — shared enrich engine → Beatport metadata"
+  analyse: "analyse.py — SDK → enriched_tracks_analysis"
+  sdk: "studio_sdk.py / dj_studio_sdk.js — SDK driver + Node helper"
+}
+
+connections: "connections/  — transport layer, no app-specific deps" {
+  a: "beatport.py — HTTP client + session token capture"
+  b: "musickit.py — Swift MusicKit bridge wrapper"
+  c: "matching.py — fuzzy title/artist match"
+  d: "bridge/ — musickit_bridge.swift (compiled, cached)"
+}
+
+detect: "detect/  — track detection" {
+  db: "db.py — all detect + enrich DB ops"
+  cli: "cli.py — argparse + async dispatch"
+  gems: "gems.py — low-play discovery (Spotify/SoundCloud/Bandcamp/Beatport)"
+  syncbp: "sync_beatport.py — Beatport library → enriched_tracks"
+  cap: "instagram/youtube/soundcloud/... — per-platform capture"
+  shazam: "shazam.py / parser.py — recognition + tracklist parsing"
+}
+
+sync: "sync/  — capture Apple Music / Spotify" {
+  cap: "capture.py — dj sync music|spotify → sync_tracks + sync_playlist_tracks"
+  push: "push.py — dj sync <app> playlist push → recreate an app playlist"
+  ad: "enrich_adapter.py — dj enrich --sync → enrich/engine"
+  db: "db.py / cli.py — canonical store + membership; dispatch"
+}
+
+playlist: "playlist/  — SQL → rows helper" {
+  q: "query.py — user SQL → beatport_ids + full row fetch"
+}
+
+export: "export/  — push targets + stored-set export" {
+  bp: "to_beatport.py — push_to_beatport + push_to_beatport_chart"
+  rb: "to_rekordbox.py — push_to_rekordbox"
+  set: "export_set.py — set id → bp_chart/bp_playlist/rekordbox"
+  cli: "cli.py — export set / beatport / rekordbox verbs"
+}
+
+djstudio: "djstudio/  — read DJ Studio files (inspection)" {
+  ex: "extractor.py — library + projects-table reader"
+  keys: "keys.py — Camelot conversion"
+}
+
+rekordbox: "rekordbox/  — writes via pyrekordbox" {
+  bk: "backup.py — master.db backup"
+  cn: "constants.py — path discovery + Camelot/cue constants"
+}
+
+apps: "apps/  — frontends via dj <name>" {
+  course: "course/ — offline course viewer (dj course start/stop)"
+  ext1001: "1001T-extension/ — Chrome MV3 PiP + tracklist overlay"
+  ext: "extension/ — dj extension pack <name> (zip any extension)"
+}
+
+vj: "vj/  — audio-reactive visuals" {
+  cli: "cli.py — dj vj <name> start/stop (portless, HTTPS)"
+  cats: "cats/ — p5.js + Meyda + aubio.js cat visualizer"
+}
+
+helpers: "helpers/  — standalone maintenance scripts" {
+  dl: "download_course.py — course downloader (Dyntube/Circle HLS)"
+}
+
+entry -> connections
+entry -> detect
+entry -> sync
+entry -> export
+sync -> playlist: "via enrich/export"
+detect -> djstudio: "inspection"
+export -> rekordbox

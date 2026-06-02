@@ -271,6 +271,50 @@ class AuthExpiredError(Exception):
     """Raised when a Beatport token is expired and cannot be refreshed."""
 
 
+def make_bp_client(*, verbose: bool = False) -> tuple["Beatport", httpx.Client]:
+    """Build a `Beatport` client + httpx client with auto-refresh on 401.
+
+    The single home for "get an authenticated Beatport client". Resolves a token
+    via the standard cascade (env access token → env session cookie → browser
+    cookie store), builds the httpx client, and wires an `on_401` handler that
+    re-resolves with `force_refresh=True` (2 attempts) and pushes the new token
+    onto the live client.
+
+    On the *initial* resolve failing, prints a hint to stderr and exits — every
+    caller is a CLI command and this is the established UX. On a *mid-run* 401
+    that can't be refreshed, raises `AuthExpiredError` so the caller can finish
+    its own cleanup (close the client, stop a progress bar) before exiting.
+
+    Returns `(Beatport, httpx.Client)`. The caller owns closing the client.
+    """
+    token = resolve_access_token()
+    if not token:
+        print(
+            "Could not get a valid Beatport token.\n"
+            "Tried env access token, env session cookie, and the browser cookie "
+            "store. Log into beatport.com in your default browser, then re-run.",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
+    client = make_client(token)
+
+    def on_401() -> None:
+        nonlocal token
+        for attempt in range(1, 3):
+            new_token = resolve_access_token(force_refresh=True, verbose=verbose)
+            if new_token:
+                token = new_token
+                client.headers["authorization"] = token
+                save_token_to_env(token)
+                return
+            if attempt < 2:
+                time.sleep(3)
+        raise AuthExpiredError("Beatport session refresh failed after 2 attempts")
+
+    return Beatport(client=client, on_401=on_401), client
+
+
 @dataclass
 class Beatport:
     client: httpx.Client
@@ -378,6 +422,15 @@ class Beatport:
             f"{API_ROOT}/my/playlists/",
             json={"name": name},
         ).json()
+
+    def delete_playlist(self, playlist_id: int) -> None:
+        """Delete a playlist from the Beatport account (the real playlist, not a local record).
+
+        Mirrors the create route (`POST /my/playlists/`) and the track-removal route
+        (`DELETE /my/playlists/{id}/tracks/bulk/`): `DELETE /my/playlists/{id}/`
+        removes the playlist itself. The catalog tracks are unaffected.
+        """
+        self._request("DELETE", f"{API_ROOT}/my/playlists/{playlist_id}/")
 
     def list_track_ids(self, playlist_id: int) -> set[int]:
         try:

@@ -16,7 +16,6 @@ from rich.progress import (
 
 from connections import beatport as bp_api
 from detect import db as detect_db
-from detect.enrich import _get_token, _try_refresh
 
 console = Console()
 
@@ -91,22 +90,7 @@ def _run_sync_beatport_impl(
     if dry_run:
         console.print("[yellow]DRY RUN[/yellow] — no changes will be made")
 
-    token = _get_token()
-    http_client = bp_api.make_client(token)
-
-    def on_401() -> None:
-        nonlocal token
-        new_token = _try_refresh()
-        if new_token:
-            console.print("[dim]Token refreshed.[/dim]")
-            token = new_token
-            http_client.headers["authorization"] = token
-        else:
-            raise bp_api.AuthExpiredError(
-                "Beatport token expired and refresh failed. Update BEATPORT_ACCESS_TOKEN in .env."
-            )
-
-    beatport = bp_api.Beatport(client=http_client, on_401=on_401)
+    beatport, http_client = bp_api.make_bp_client(verbose=verbose)
 
     console.print("Fetching Beatport playlists…")
     try:

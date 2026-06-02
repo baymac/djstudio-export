@@ -467,7 +467,7 @@ def search_beatport_gems(genre: str, count: int, max_age_days: int,
         )
 
     from connections.beatport import API_ROOT, Beatport, make_client  # noqa: PLC0415
-    from detect.enrich import _get_token  # noqa: PLC0415
+    from enrich.engine import _get_token  # noqa: PLC0415
 
     cutoff = _cutoff(max_age_days)
     today = datetime.now(tz=timezone.utc)
