@@ -181,7 +181,7 @@ def migrate() -> None:
         # (artist/title/bpm/key/genre/mix_name/label/...) live on `enriched_tracks`
         # and are joined in at query time.
         # A row exists in this table only after `dj enrich analyse` has
-        # populated it (Stage 5). The SDK driver writes directly here — DJ
+        # populated it. The SDK driver writes directly here — DJ
         # Studio's filesystem is never touched.
         con.execute("""
             CREATE TABLE IF NOT EXISTS enriched_tracks_analysis (
