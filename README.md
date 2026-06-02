@@ -555,6 +555,26 @@ uv run dj_cli.py playlist rekordbox \
 
 ---
 
+## export — stored set → Beatport chart / playlist / rekordbox
+
+The set builder (the `dj-set-builder` skill, or `helpers/build_set.py`) curates and sequences a set, stores it in `dj_sets`, and hands back a **set id**. It does not export. `dj export set <id>` is the separate, decoupled step that pushes a stored set's tracks — **in set order** — to a destination.
+
+```bash
+uv run dj_cli.py export set 42 --to bp_chart                        # publishable Beatport chart (draft)
+uv run dj_cli.py export set 42 --to bp_playlist --name "Peak Time"  # Beatport playlist
+uv run dj_cli.py export set 42 --to rekordbox --dry-run             # rekordbox playlist (quit rekordbox first)
+```
+
+- `--name` overrides the destination chart/playlist name (defaults to the set's stored name).
+- `--description` applies to `bp_chart` only; without it the description is built from the set's stored mood / duration / archetype.
+- `bp_chart` creates an **unpublished draft** — publish it from beatport.com → DJ profile → Charts. Insertion order becomes chart position, so tracks land in set order.
+- `rekordbox` re-fetches full rows (artist/title/genre/key/bpm/duration) before pushing; quit rekordbox first, then Analyze Tracks in rekordbox to generate beatgrid + cues.
+- All destinations accept `--dry-run`.
+
+The push code itself lives in `export/to_beatport.py` + `export/to_rekordbox.py` and is shared with `dj playlist …` and `detect export-to-rekordbox` (Stage 6a) — one home for "write tracks to a destination".
+
+---
+
 ## Environment variables
 
 Copy `.env.example` to `.env` and set these before using `detect` or `sync`.
@@ -902,9 +922,13 @@ sync/                           Stage 1: Apple Music → Beatport
 
 playlist/                       SQL-curated push to a destination
   query.py                      Run user SQL → list[beatport_id] + full row fetch
-  to_beatport.py                Push to a Beatport playlist
-  to_rekordbox.py               Push to a rekordbox playlist (also imported by Stage 6a)
-  cli.py                        argparse subcommands
+  cli.py                        argparse subcommands (uses export/ pushers)
+
+export/                         Push targets + stored-set export
+  to_beatport.py                push_to_beatport (playlist) + push_to_beatport_chart
+  to_rekordbox.py               push_to_rekordbox (also imported by Stage 6a + playlist)
+  export_set.py                 Resolve a set id → push to bp_chart/bp_playlist/rekordbox
+  cli.py                        `dj export set <id> --to ...`
 
 djstudio/                       Read DJ Studio project files + library (used for ad-hoc inspection)
   extractor.py                  audio-library-table + projects-table reader

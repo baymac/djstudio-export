@@ -43,9 +43,13 @@ sync/                           Stage 1: Apple Music → Beatport
 
 playlist/                       SQL-curated push to Beatport or rekordbox
   query.py                      Run user SQL → list[beatport_id] + full-row fetch
-  to_beatport.py                Push to a Beatport playlist
-  to_rekordbox.py               Push to a rekordbox playlist (also called by Stage 6a)
-  cli.py
+  cli.py                        `dj playlist beatport|rekordbox` (uses export/ pushers)
+
+export/                         Push targets (shared by playlist + detect Stage 6a + `dj export set`)
+  to_beatport.py                push_to_beatport (playlist) + push_to_beatport_chart
+  to_rekordbox.py               push_to_rekordbox (also called by Stage 6a + playlist rekordbox)
+  export_set.py                 Resolve a stored set id → push to bp_chart/bp_playlist/rekordbox
+  cli.py                        `dj export set <id> --to bp_chart|bp_playlist|rekordbox`
 
 djstudio/                       Read DJ Studio's local files (used for ad-hoc inspection)
   extractor.py                  audio-library-table + projects-table reader
@@ -90,6 +94,11 @@ uv run dj_cli.py detect import-rekordbox-analysis
 # SQL → playlist (Beatport or rekordbox)
 uv run dj_cli.py playlist beatport  --query "SELECT beatport_id FROM enriched_tracks WHERE ..." --name "..."
 uv run dj_cli.py playlist rekordbox --query "..." --name "..."
+
+# Stored set → destination (set id comes from the dj-set-builder skill / helpers/build_set.py)
+uv run dj_cli.py export set <id> --to bp_chart                       # publishable Beatport chart (draft)
+uv run dj_cli.py export set <id> --to bp_playlist --name "Peak Time" # Beatport playlist
+uv run dj_cli.py export set <id> --to rekordbox --dry-run            # rekordbox playlist (quit rekordbox first)
 
 # Course viewer (offline)
 dj course start                                                                         # spawn vite via portless, open https://course.localhost
@@ -138,6 +147,8 @@ uv run helpers/cleanup_playlist.py "Playlist Name" --dry-run
 
 ### playlist (SQL → destination)
 
-- **Stage 6a (`detect export-to-rekordbox`) and `playlist rekordbox` share the same core** — `playlist.to_rekordbox.push_to_rekordbox(rows, name)` does the writing. Stage 6a wraps it with the `rekordbox_export_at IS NULL` pending-query and an `on_added` callback to stamp the timestamp. `playlist rekordbox` calls the same function with no callback — pure ad-hoc curation, no pipeline-stamp side effects.
+- **All push targets live in `export/`** — `export.to_beatport` (`push_to_beatport` + `push_to_beatport_chart`) and `export.to_rekordbox` (`push_to_rekordbox`) are the single home for "write tracks to a destination". Three callers share them: `dj playlist beatport|rekordbox` (ad-hoc SQL curation), `detect export-to-rekordbox` (Stage 6a), and `dj export set <id>`. The old `playlist/to_beatport.py` + `playlist/to_rekordbox.py` were merged here in Phase 2; `playlist/` now only owns `query.py` (SQL → rows) + `cli.py`.
+- **Stage 6a (`detect export-to-rekordbox`) and `playlist rekordbox` share the same core** — `export.to_rekordbox.push_to_rekordbox(rows, name)` does the writing. Stage 6a wraps it with the `rekordbox_export_at IS NULL` pending-query and an `on_added` callback to stamp the timestamp. `playlist rekordbox` calls the same function with no callback — pure ad-hoc curation, no pipeline-stamp side effects.
+- **`dj export set <id> --to ...` is the only set→destination bridge** — `export.export_set.export_set(set_id, to)` resolves a stored set (`detect.db.get_set` + `tracks_in_set_id`, in set order), then dispatches: `bp_chart` → `push_to_beatport_chart` (publishable draft, description defaults from the set's mood/duration/archetype), `bp_playlist` → `push_to_beatport`, `rekordbox` → `fetch_full_rows` (via `playlist.query`) + `push_to_rekordbox`. The set builder (`helpers/build_set.py` / the `dj-set-builder` skill) stays decoupled: it only writes the set + returns the id; nothing exports until this command runs.
 - **User SQL must return `beatport_id`** — `playlist.query.run_user_query` validates the query starts with `SELECT` (the only check; the column-shape error fires after fetch if `beatport_id` isn't in the result set). After exec, `fetch_full_rows` re-fetches via `enriched_tracks LEFT JOIN enriched_tracks_analysis USING(beatport_id)` so push code always has artist/title/genre/key/bpm/length_ms regardless of how the user wrote their SQL. The query runs with the connection's full DB privileges — this tool assumes the user owns the database.
 - **No DJ Studio writes from this tool** — the previous `playlist dj-studio` destination wrote `projects-table/<uuid>` + `projects-meta-table/<uuid>` files, but DJ Studio also tracks per-mix UI state in IndexedDB (`~/Library/Application Support/DJ.Studio/IndexedDB/local-web_*.indexeddb.leveldb/`) that we couldn't write to — meaning UI delete was a no-op for tool-created mixes (the right-click → Delete flow looks up the IndexedDB row, doesn't find it, silently fails). We removed the destination rather than ship a half-working write path. DJ Studio is now read-only for this tool: we drive its SDK for analysis (`studio-analyse`) and read its library + projects-table for inspection only.

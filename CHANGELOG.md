@@ -2,6 +2,19 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.5.0] - 2026-06-02
+
+### Added
+- **`dj export set <id> --to bp_chart|bp_playlist|rekordbox`** — push a stored set's tracks, in set order, to a publishable Beatport chart (created as an unpublished draft), a Beatport playlist, or a rekordbox playlist. `--name` overrides the destination name; `--description` (chart only) defaults to a line built from the set's mood/duration/archetype; every destination accepts `--dry-run`.
+- **`dj-set-builder` skill + `helpers/build_set.py`** — curate and sequence a DJ set from the analysed library along an energy-curve archetype (warm-up, peak-time, club-night, party, sunset, and more), then store it in the new `dj_sets` tables and return its id. Sequencing walks an intensity curve greedily while keeping tracks harmonically and tempo-mixable, with a configurable release-date blend (`--date-blend`) and genre overrides (`--genres`).
+- **Beatport chart support** — new chart API methods (`list_my_charts`, `create_chart`, `update_chart`, `list_chart_track_ids`, `add_chart_track`) so charts can be created, reused, and filled in order without disturbing playlists.
+
+### Changed
+- **Push targets consolidated under `export/`** — `playlist/to_beatport.py` and `playlist/to_rekordbox.py` moved to `export/to_beatport.py` and `export/to_rekordbox.py`, now the single home for "write tracks to a destination" shared by `dj playlist`, `dj export set`, and `detect export-to-rekordbox` (Stage 6a). `dj playlist` behaviour is unchanged.
+
+### Fixed
+- `.gitignore` no longer carries a stray trailing backslash on the `!package.json` rule; the `dj-set-builder` skill is now tracked instead of ignored.
+
 ## [0.1.4.0] - 2026-05-29
 
 ### Added
