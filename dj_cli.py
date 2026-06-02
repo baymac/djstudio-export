@@ -24,6 +24,7 @@ load_dotenv(Path(__file__).parent / ".env", override=True)
 from detect.cli import add_detect_subparser, dispatch as dispatch_detect
 from sync.cli import add_sync_subparser, dispatch as dispatch_sync
 from playlist.cli import add_playlist_subparser, dispatch as dispatch_playlist
+from export.cli import add_export_subparser, dispatch as dispatch_export
 from apps.course.cli import run_start as course_start, run_stop as course_stop
 from apps.extension.cli import pack as extension_pack, list_extensions
 from vj.cli import run_start as vj_start, run_stop as vj_stop, list_apps as vj_list_apps
@@ -52,6 +53,7 @@ Examples:
     detect_p = add_detect_subparser(sub)
     sync_p = add_sync_subparser(sub)
     playlist_p = add_playlist_subparser(sub)
+    export_p = add_export_subparser(sub)
 
     course_p = sub.add_parser("course", help="Start/stop the offline course viewer")
     course_sub = course_p.add_subparsers(dest="course_action")
@@ -71,11 +73,11 @@ Examples:
     ext_pack_p = ext_sub.add_parser("pack", help="Zip the extension to ~/Music/dj/extensions/")
     ext_pack_p.add_argument("name", help="Extension name (e.g. 1001T for apps/1001T-extension/)")
 
-    return parser, detect_p, sync_p, playlist_p, course_p, vj_p, ext_p
+    return parser, detect_p, sync_p, playlist_p, export_p, course_p, vj_p, ext_p
 
 
 def main() -> None:
-    parser, detect_p, sync_p, playlist_p, course_p, vj_p, ext_p = _build_parser()
+    parser, detect_p, sync_p, playlist_p, export_p, course_p, vj_p, ext_p = _build_parser()
     args = parser.parse_args()
 
     if args.command == "detect":
@@ -84,6 +86,8 @@ def main() -> None:
         dispatch_sync(args, sync_p)
     elif args.command == "playlist":
         dispatch_playlist(args, playlist_p)
+    elif args.command == "export":
+        dispatch_export(args, export_p)
     elif args.command == "course":
         if args.course_action == "start":
             course_start()

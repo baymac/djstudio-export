@@ -40,7 +40,7 @@ from rich.progress import (
 )
 
 from detect import db as detect_db
-from playlist.to_rekordbox import is_rekordbox_running
+from rekordbox.utils import is_rekordbox_running
 
 console = Console()
 

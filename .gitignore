@@ -4,7 +4,6 @@ __pycache__/
 *.pyc
 *.json
 !package.json
-.claude/
 .beatport_token
 logs/
 *.log

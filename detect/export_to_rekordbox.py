@@ -2,7 +2,7 @@
 
 Reads tracks from enriched_tracks_analysis where rekordbox_export_at IS NULL
 (i.e., already through Stage 5 studio-analyse but not yet pushed) and sends
-them to a rekordbox playlist via `playlist.to_rekordbox`. Marks each track's
+them to a rekordbox playlist via `export.to_rekordbox`. Marks each track's
 rekordbox_export_at on success so re-runs only pick up new rows.
 
 For ad-hoc curated playlist pushes, use `dj playlist rekordbox` — it takes a
@@ -13,7 +13,7 @@ from __future__ import annotations
 from rich.console import Console
 
 from detect import db as detect_db
-from playlist.to_rekordbox import push_to_rekordbox
+from export.to_rekordbox import push_to_rekordbox
 
 console = Console()
 

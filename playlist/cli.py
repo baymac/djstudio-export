@@ -90,10 +90,10 @@ def _dispatch_impl(args, p: argparse.ArgumentParser, cmd: str) -> None:
         )
 
     if cmd == "beatport":
-        from playlist.to_beatport import push_to_beatport
+        from export.to_beatport import push_to_beatport
         push_to_beatport(beatport_ids, args.name, dry_run=args.dry_run, console=console)
     elif cmd == "rekordbox":
-        from playlist.to_rekordbox import push_to_rekordbox
+        from export.to_rekordbox import push_to_rekordbox
         push_to_rekordbox(rows, args.name, dry_run=args.dry_run, console=console)
     else:
         p.print_help()

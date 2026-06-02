@@ -71,7 +71,7 @@ def push_to_rekordbox(
         return counts
 
     console.print(
-        f"[bold]playlist → rekordbox[/bold] ← {len(rows)} tracks  →  [yellow]{playlist_name}[/yellow]"
+        f"[bold]export → rekordbox[/bold] ← {len(rows)} tracks  →  [yellow]{playlist_name}[/yellow]"
     )
     if dry_run:
         console.print("  [dim]DRY RUN — no writes[/dim]")
