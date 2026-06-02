@@ -278,7 +278,7 @@ def search_soundcloud_gems(genre: str, count: int, max_age_days: int,
     if not sc_api.has_credentials():
         raise RuntimeError(
             "SOUNDCLOUD_CLIENT_ID / SOUNDCLOUD_CLIENT_SECRET not set in .env.\n"
-            "Add them or run `dj detect login-soundcloud` first."
+            "Add them to use SoundCloud gem discovery (auth is then automatic)."
         )
 
     token = sc_api._get_token()
@@ -467,7 +467,7 @@ def search_beatport_gems(genre: str, count: int, max_age_days: int,
         )
 
     from connections.beatport import API_ROOT, Beatport, make_client  # noqa: PLC0415
-    from detect.enrich import _get_token  # noqa: PLC0415
+    from enrich.engine import _get_token  # noqa: PLC0415
 
     cutoff = _cutoff(max_age_days)
     today = datetime.now(tz=timezone.utc)

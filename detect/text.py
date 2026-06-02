@@ -27,6 +27,12 @@ _TS_CAPTURE_RE = re.compile(r"^[\[(]?(\d{1,2}):(\d{2})(?::(\d{2}))?[\])]?")
 _POS_RE = re.compile(r"^\d+[.)]\s*")
 # "w/" overlay prefix: "w/ Artist – Title"
 _W_PREFIX_RE = re.compile(r"^w/\s*", re.IGNORECASE)
+# collaboration joiners in an artist field. A mashup credit strings several
+# artists together ("A & B vs. C x D ft. E"); we count words per sub-artist
+# across these joiners so multi-artist lines aren't mistaken for prose.
+_ARTIST_JOINER_RE = re.compile(
+    r"\s*(?:&|/|\+|,|\bvs\.?\b|\bx\b|\bft\.?\b|\bfeat\.?\b)\s*", re.IGNORECASE
+)
 # skip "ID – ID" placeholder lines
 _ID_LINE_RE = re.compile(r"^ID\s*[-–—]\s*ID$", re.IGNORECASE)
 # bare URLs
@@ -87,9 +93,12 @@ def _parse_line(line: str) -> Optional[dict]:
     title = cleaned[m.end() :].strip()
     if not artist or not title:
         return None
-    if len(artist) > 150 or len(title) > 200:
+    if len(artist) > 250 or len(title) > 250:
         return None
-    if len(artist.split()) > 10:
+    # Reject prose: a single un-joined run over 10 words is almost never a
+    # real artist name. Multi-artist mashups split into short sub-artists, so
+    # they pass even when the whole field is long.
+    if any(len(seg.split()) > 10 for seg in _ARTIST_JOINER_RE.split(artist)):
         return None
     return {"artist": artist, "title": title}
 

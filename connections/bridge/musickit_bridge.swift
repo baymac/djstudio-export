@@ -5,11 +5,10 @@
 // Modes (mutually exclusive, checked in order):
 //   --check                  → test authorization; exit 0 = OK, exit 2 = not authorized
 //   --list-playlists         → JSON array of user playlist names (excludes "Favourite Songs")
-//   --playlist NAME          → NDJSON for tracks in the named playlist
+//   --all-playlists          → NDJSON, one row per playlist ENTRY (ordered, dup-preserving,
+//                              tagged with native_playlist_id + position) — faithful capture
 //   --library-songs          → NDJSON for songs with libraryAddedDate set (Music app "Songs" tab)
 //   --favorites              → NDJSON for songs in the "Favourite Songs" playlist
-//   --library-and-favorites  → NDJSON union of --library-songs and --favorites
-//   (no args)                → NDJSON for full library (all songs, no filter)
 
 import MusicKit
 import Foundation
@@ -83,8 +82,7 @@ func runListPlaylists() async {
 
 // ---------- Playlist data loading ----------
 
-// Fast path: only load the Favourite Songs playlist keys.
-// Used for --favorites and --library-and-favorites (no need for full trackPlaylists map).
+// Fast path: only load the Favourite Songs playlist keys (used for --favorites).
 func loadFavouriteKeys() async -> Set<TrackKey> {
     var keys = Set<TrackKey>()
     let req = MusicLibraryRequest<Playlist>()
@@ -103,50 +101,13 @@ func loadFavouriteKeys() async -> Set<TrackKey> {
 
 struct PlaylistData {
     var favouriteKeys: Set<TrackKey> = []
-    var targetKeys: Set<TrackKey>? = nil   // nil = not filtering
-    var trackPlaylists: [TrackKey: [String]] = [:]
-}
-
-// Full load — used for --playlist mode (needs targetKeys) and no-args mode (needs trackPlaylists).
-func loadPlaylistData(filterPlaylist: String?) async -> PlaylistData {
-    var data = PlaylistData()
-    var playlistRequest = MusicLibraryRequest<Playlist>()
-    guard let response = try? await playlistRequest.response() else { return data }
-
-    for playlist in response.items {
-        guard let detailed = try? await playlist.with([.tracks]),
-              let tracks = detailed.tracks else { continue }
-
-        if playlist.name == "Favourite Songs" {
-            for track in tracks {
-                if let key = keyFromTrack(track) { data.favouriteKeys.insert(key) }
-            }
-        } else if let target = filterPlaylist, playlist.name == target {
-            var keys = Set<TrackKey>()
-            for track in tracks {
-                if let key = keyFromTrack(track) { keys.insert(key) }
-            }
-            data.targetKeys = keys
-        } else if filterPlaylist == nil {
-            for track in tracks {
-                if let key = keyFromTrack(track) {
-                    data.trackPlaylists[key, default: []].append(playlist.name)
-                }
-            }
-        }
-    }
-
-    return data
 }
 
 // ---------- Stream library songs ----------
 
 enum StreamMode {
-    case all              // no filter — every song in library
-    case playlist         // only songs matching targetKeys
     case library          // only songs with libraryAddedDate set (Music app "Songs" tab)
     case favorites        // only songs present in favouriteKeys
-    case libraryAndFavorites  // songs with libraryAddedDate set OR in favouriteKeys
 }
 
 func streamSongs(filter: PlaylistData, mode: StreamMode) async {
@@ -170,16 +131,10 @@ func streamSongs(filter: PlaylistData, mode: StreamMode) async {
 
             let include: Bool
             switch mode {
-            case .all:
-                include = true
-            case .playlist:
-                include = filter.targetKeys?.contains(key) ?? false
             case .library:
                 include = song.libraryAddedDate != nil
             case .favorites:
                 include = filter.favouriteKeys.contains(key)
-            case .libraryAndFavorites:
-                include = song.libraryAddedDate != nil || filter.favouriteKeys.contains(key)
             }
 
             guard include else { continue }
@@ -194,7 +149,7 @@ func streamSongs(filter: PlaylistData, mode: StreamMode) async {
                 "album": song.albumTitle ?? "",
                 "genre": song.genreNames.first ?? "",
                 "loved": filter.favouriteKeys.contains(key),
-                "playlists": filter.trackPlaylists[key] ?? [],
+                "playlists": [String](),
                 "library_added_date": addedDateStr,
             ]
             print(toJSON(record))
@@ -210,6 +165,46 @@ func streamSongs(filter: PlaylistData, mode: StreamMode) async {
     }
 
     fputs("Done: \(total) songs\n", stderr)
+}
+
+// ---------- Stream all playlists (faithful capture) ----------
+
+// Emits one NDJSON row per playlist ENTRY, in playlist order. Unlike the
+// key-based no-args mode this preserves position and keeps duplicate entries,
+// and tags each row with the playlist's STABLE id — what `dj sync music` needs
+// to faithfully back up (and later recreate) a playlist.
+func streamAllPlaylists() async {
+    let request = MusicLibraryRequest<Playlist>()
+    guard let response = try? await request.response() else {
+        fputs("Error: could not fetch playlists\n", stderr)
+        exit(1)
+    }
+
+    var total = 0
+    for playlist in response.items {
+        guard let detailed = try? await playlist.with([.tracks]),
+              let tracks = detailed.tracks else { continue }
+
+        for (idx, track) in tracks.enumerated() {
+            guard case .song(let song) = track else { continue }
+            let catalogID = extractCatalogID(from: song.playParameters)
+            let record: [String: Any] = [
+                "playlist_name": playlist.name,
+                "native_playlist_id": playlist.id.rawValue,
+                "position": idx,
+                "native_track_id": catalogID.isEmpty ? song.id.rawValue : catalogID,
+                "library_id": song.id.rawValue,
+                "url": song.url?.absoluteString ?? "",
+                "name": song.title,
+                "artist": song.artistName,
+                "album": song.albumTitle ?? "",
+            ]
+            print(toJSON(record))
+            total += 1
+        }
+        fflush(stdout)
+    }
+    fputs("Done: \(total) playlist entries\n", stderr)
 }
 
 // ---------- Entry point ----------
@@ -233,6 +228,12 @@ func main() async {
         exit(2)
     }
 
+    if args.contains("--all-playlists") {
+        fputs("Streaming all playlists (faithful, ordered)…\n", stderr)
+        await streamAllPlaylists()
+        exit(0)
+    }
+
     if args.contains("--library-songs") {
         fputs("Streaming library songs (libraryAddedDate set)…\n", stderr)
         await streamSongs(filter: PlaylistData(), mode: .library)
@@ -249,39 +250,9 @@ func main() async {
         exit(0)
     }
 
-    if args.contains("--library-and-favorites") {
-        fputs("Loading Favourite Songs playlist…\n", stderr)
-        let favKeys = await loadFavouriteKeys()
-        fputs("Streaming library + \(favKeys.count) favourite songs…\n", stderr)
-        var filter = PlaylistData()
-        filter.favouriteKeys = favKeys
-        await streamSongs(filter: filter, mode: .libraryAndFavorites)
-        exit(0)
-    }
-
-    // Playlist mode or full-library mode
-    var playlistName: String? = nil
-    if let idx = args.firstIndex(of: "--playlist") {
-        let next = args.index(after: idx)
-        if next < args.endIndex {
-            playlistName = args[next]
-        }
-    }
-
-    fputs("Loading playlist data…\n", stderr)
-    let filter = await loadPlaylistData(filterPlaylist: playlistName)
-
-    if let name = playlistName {
-        if filter.targetKeys == nil {
-            fputs("Error: playlist '\(name)' not found\n", stderr)
-            exit(1)
-        }
-        fputs("Streaming tracks from '\(name)' (\(filter.targetKeys!.count) track keys)…\n", stderr)
-        await streamSongs(filter: filter, mode: .playlist)
-    } else {
-        await streamSongs(filter: filter, mode: .all)
-    }
-    exit(0)
+    fputs("Error: no mode specified. Use one of: --check, --list-playlists, "
+          + "--all-playlists, --library-songs, --favorites.\n", stderr)
+    exit(2)
 }
 
 Task { await main() }

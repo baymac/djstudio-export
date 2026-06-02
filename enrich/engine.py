@@ -1,11 +1,19 @@
-"""Enrich detected tracks with Beatport metadata (bpm, key, genre, release_date, beatport_id, beatport_link)."""
+"""Enrich tracks with Beatport metadata (bpm, key, genre, release_date, beatport_id, beatport_link).
+
+The matching/search loop is a SHARED ENGINE (`run_enrich_engine`) parameterised by a
+`SourceAdapter`. `dj enrich --detect` drives it with `DetectAdapter` (candidates from
+`detected_tracks`); `dj enrich --sync` drives the same engine with a sync adapter
+(candidates from `sync_tracks`) — see `sync/enrich_adapter.py`. Both write to the one
+deduped `enriched_tracks` table. "Keep the code the same" is literal: one loop, two
+thin persistence adapters.
+"""
 from __future__ import annotations
 
 import re
 import sys
 from datetime import datetime
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Protocol
 
 from rich.console import Console
 from rich.progress import (
@@ -83,9 +91,107 @@ def _bp_meta(match: dict) -> dict:
     }
 
 
+def _fetch_extras(beatport: "bp_api.Beatport", beatport_id: int) -> dict:
+    """Fetch full Beatport catalog detail (label/ISRC/sub_genre/mix_name/length).
+
+    Non-critical: any failure returns {} so the basic enrich still succeeds.
+    """
+    try:
+        full_track = beatport.get_track(beatport_id)
+        if not full_track:
+            return {}
+        label_obj = (full_track.get("release") or {}).get("label") or {}
+        sub_genre_obj = full_track.get("sub_genre") or {}
+        return {
+            "mix_name": full_track.get("mix_name"),
+            "label": label_obj.get("name") if isinstance(label_obj, dict) else None,
+            "catalog_number": full_track.get("catalog_number"),
+            "isrc": full_track.get("isrc"),
+            "sub_genre": sub_genre_obj.get("name") if isinstance(sub_genre_obj, dict) else None,
+            "length_ms": full_track.get("length_ms"),
+        }
+    except Exception:
+        return {}
+
+
+# ── Source adapters ───────────────────────────────────────────────────────────
+# The engine persists through one of these. Each maps the generic enrich
+# vocabulary onto a concrete source table (detected_tracks or sync_tracks).
+
+
+class SourceAdapter(Protocol):
+    name: str
+
+    def load_candidates(self, retry_misses: bool) -> list: ...
+    def secret_count(self) -> int: ...
+    def mark_secret(self, row_id: int) -> None: ...
+    def mark_miss(self, row_id: int, outcome: str) -> None: ...
+    def seen_pairs(self) -> list: ...
+    def link_existing(self, row_id: int, beatport_id: int) -> bool: ...
+    def save_enriched(self, row_id: int, meta: dict, extras: dict) -> None: ...
+    def insert_extra(self, artist: str, title: str, source: str) -> int: ...
+    def start_run(self) -> int: ...
+    def finish_run(self, run_id: int, seen: int, found: int, not_found: int,
+                   fuzzy_miss: int, duplicate: int) -> None: ...
+
+
+class DetectAdapter:
+    """Adapter over `detected_tracks` — backs `dj enrich --detect`."""
+
+    name = "Enrich"
+
+    def load_candidates(self, retry_misses: bool) -> list:
+        return detect_db.get_retry_tracks() if retry_misses else detect_db.get_unenriched_tracks()
+
+    def secret_count(self) -> int:
+        return detect_db.count_secret_tracks()
+
+    def mark_secret(self, row_id: int) -> None:
+        detect_db.mark_enrich_miss(row_id, "secret")
+
+    def mark_miss(self, row_id: int, outcome: str) -> None:
+        mark_enrich_miss(row_id, outcome)
+
+    def seen_pairs(self) -> list:
+        return get_enriched_artist_titles()
+
+    def link_existing(self, row_id: int, beatport_id: int) -> bool:
+        return detect_db.link_detected_to_enriched(row_id, beatport_id)
+
+    def save_enriched(self, row_id: int, meta: dict, extras: dict) -> None:
+        detect_db.upsert_enriched(row_id, meta, extras=extras)
+
+    def insert_extra(self, artist: str, title: str, source: str) -> int:
+        return detect_db.insert_track({"artist": artist, "title": title}, source=source)
+
+    def start_run(self) -> int:
+        return detect_db.start_enrich_run()
+
+    def finish_run(self, run_id, seen, found, not_found, fuzzy_miss, duplicate) -> None:
+        detect_db.finish_enrich_run(
+            run_id, seen=seen, found=found, not_found=not_found,
+            fuzzy_miss=fuzzy_miss, duplicate=duplicate,
+        )
 
 
 def run_enrich(
+    dry_run: bool,
+    limit: int,
+    verbose: bool,
+    threshold: float,
+    retry_misses: bool,
+) -> None:
+    """`dj enrich --detect` entrypoint — drives the shared engine over detected_tracks."""
+    run_enrich_engine(
+        DetectAdapter(),
+        dry_run=dry_run, limit=limit, verbose=verbose,
+        threshold=threshold, retry_misses=retry_misses,
+    )
+
+
+def run_enrich_engine(
+    adapter: SourceAdapter,
+    *,
     dry_run: bool,
     limit: int,
     verbose: bool,
@@ -97,47 +203,27 @@ def run_enrich(
 
     if retry_misses:
         console.print("Loading previously missed tracks for retry…")
-        tracks = detect_db.get_retry_tracks()
     else:
-        console.print("Loading un-enriched detected tracks…")
-        tracks = detect_db.get_unenriched_tracks()
+        console.print("Loading un-enriched tracks…")
+    tracks = adapter.load_candidates(retry_misses)
     if limit:
         tracks = tracks[:limit]
 
     if not tracks:
-        secret_n = detect_db.count_secret_tracks()
-        msg = "Nothing to enrich — all detected tracks already have Beatport data."
+        secret_n = adapter.secret_count()
+        msg = "Nothing to enrich — all tracks already have Beatport data."
         if secret_n:
             msg += f" ({secret_n} secret/ID-placeholder tracks skipped)"
         console.print(msg)
         return
 
-    secret_n = detect_db.count_secret_tracks()
+    secret_n = adapter.secret_count()
     secret_note = f"  [dim]({secret_n} secret/ID-placeholder tracks skipped)[/dim]" if secret_n else ""
     console.print(f"[bold]{len(tracks)}[/bold] tracks to enrich{secret_note}")
 
-    token = _get_token()
-    http_client = bp_api.make_client(token)
+    beatport, http_client = bp_api.make_bp_client(verbose=verbose)
 
-    def on_401() -> None:
-        nonlocal token
-        import time as _t
-        for attempt in range(1, 3):
-            new_token = _try_refresh()
-            if new_token:
-                console.print("[dim]Token refreshed.[/dim]")
-                token = new_token
-                http_client.headers["authorization"] = token
-                bp_api.save_token_to_env(token)
-                return
-            if attempt < 2:
-                console.print(f"[dim]Session refresh failed (attempt {attempt}/2) — retrying in 3s…[/dim]")
-                _t.sleep(3)
-        raise bp_api.AuthExpiredError("session refresh failed after 2 attempts")
-
-    beatport = bp_api.Beatport(client=http_client, on_401=on_401)
-
-    run_id = detect_db.start_enrich_run()
+    run_id = adapter.start_run()
     _LOG_DIR.mkdir(parents=True, exist_ok=True)
     date_str = datetime.now().strftime("%Y-%m-%d")
     log_path = _LOG_DIR / f"{date_str}_{run_id}.log"
@@ -161,14 +247,14 @@ def run_enrich(
         if verbose:
             progress.log(rich_msg or plain)
 
-    counts = {"seen": 0, "found": 0, "not_found": 0, "fuzzy_miss": 0, "failed": 0, "duplicate": 0, "skipped_id": 0}
+    counts = {"seen": 0, "found": 0, "not_found": 0, "fuzzy_miss": 0, "failed": 0, "duplicate": 0, "skipped_id": 0, "mashup_extra": 0}
 
     # Seed seen base-titles from already-enriched tracks so that version variants
-    # detected in a previous run are also caught.
+    # enriched in a previous run are also caught.
     # Maps base_key → beatport_id so duplicates can copy the enriched row.
     seen_base_titles: dict[tuple[str, str], int | None] = {
         _base_key(r["artist"], r["title"]): r["beatport_id"]
-        for r in get_enriched_artist_titles()
+        for r in adapter.seen_pairs()
         if r["artist"] and r["title"]
     }
 
@@ -188,7 +274,7 @@ def run_enrich(
             if detect_db.is_id_placeholder(artist) or detect_db.is_id_placeholder(title):
                 _log(f"skipped_id  {artist} — {title}")
                 if not dry_run:
-                    detect_db.mark_enrich_miss(track_id, "secret")
+                    adapter.mark_secret(track_id)
                 counts["skipped_id"] += 1
                 continue
 
@@ -196,7 +282,7 @@ def run_enrich(
             if bk in seen_base_titles:
                 existing_bp_id = seen_base_titles[bk]
                 if not dry_run and existing_bp_id is not None:
-                    linked = detect_db.link_detected_to_enriched(track_id, existing_bp_id)
+                    linked = adapter.link_existing(track_id, existing_bp_id)
                     if linked:
                         counts["duplicate"] += 1
                         _log(
@@ -209,7 +295,7 @@ def run_enrich(
                     f"[dim]duplicate:[/dim] {artist} — {title}",
                 )
                 if not dry_run:
-                    mark_enrich_miss(track_id, "duplicate")
+                    adapter.mark_miss(track_id, "duplicate")
                 counts["duplicate"] += 1
                 continue
             # Reserve this base title for the current run before the API call
@@ -240,7 +326,7 @@ def run_enrich(
                 _log(f"no_results  {artist} — {title}",
                      f"[yellow]no results:[/yellow] {artist} — {title}")
                 if not dry_run:
-                    mark_enrich_miss(track_id, "not_found")
+                    adapter.mark_miss(track_id, "not_found")
                 continue
 
             match, score = best_match(title, artist, results, threshold)
@@ -293,8 +379,8 @@ def run_enrich(
                             )
 
             # vs. mashup: "A vs. B — T1 vs. T2" → search each component separately.
-            # First hit enriches the original detected_track; subsequent hits are
-            # stored in split_extras and inserted as new detected_track rows below.
+            # First hit enriches the original row; subsequent hits are stored in
+            # split_extras and inserted as new source rows below.
             split_extras: list[tuple[str, str, dict, float]] = []
             if not match:
                 for v_title, v_artist in split_mashup_variants(title, artist):
@@ -331,7 +417,7 @@ def run_enrich(
                     f"[yellow]fuzzy miss:[/yellow] {artist} — {title}  score={score:.2f}",
                 )
                 if not dry_run:
-                    mark_enrich_miss(track_id, "fuzzy_miss")
+                    adapter.mark_miss(track_id, "fuzzy_miss")
                 continue
 
             meta = _bp_meta(match)
@@ -346,30 +432,14 @@ def run_enrich(
                     _log(
                         f"would_enrich  {v_artist} — {v_title}  →  bp:{v_meta['beatport_id']}  score={v_score:.2f}  [mashup split]",
                     )
-                counts["found"] += 1 + len(split_extras)
+                counts["found"] += 1
+                counts["mashup_extra"] += len(split_extras)
                 continue
 
-            # Fetch full Beatport catalog detail before upserting so the lean
-            # row in enriched_tracks gets label/ISRC/sub_genre/etc. on the
-            # initial INSERT.
-            extras = {}
-            try:
-                full_track = beatport.get_track(meta["beatport_id"])
-                if full_track:
-                    label_obj = (full_track.get("release") or {}).get("label") or {}
-                    sub_genre_obj = full_track.get("sub_genre") or {}
-                    extras = {
-                        "mix_name": full_track.get("mix_name"),
-                        "label": label_obj.get("name") if isinstance(label_obj, dict) else None,
-                        "catalog_number": full_track.get("catalog_number"),
-                        "isrc": full_track.get("isrc"),
-                        "sub_genre": sub_genre_obj.get("name") if isinstance(sub_genre_obj, dict) else None,
-                        "length_ms": full_track.get("length_ms"),
-                    }
-            except Exception:
-                pass  # Non-critical — basic enrich still succeeds with empty extras.
-
-            detect_db.upsert_enriched(track_id, meta, extras=extras)
+            # Fetch full Beatport catalog detail before saving so the lean row in
+            # enriched_tracks gets label/ISRC/sub_genre/etc. on the initial INSERT.
+            extras = _fetch_extras(beatport, meta["beatport_id"])
+            adapter.save_enriched(track_id, meta, extras)
             seen_base_titles[bk] = meta["beatport_id"]
 
             counts["found"] += 1
@@ -378,36 +448,18 @@ def run_enrich(
                 f"[green]enriched:[/green] {artist} — {title}  →  {meta['beatport_link']}",
             )
 
-            # Enrich additional mashup components as new detected_track rows so
-            # both sides of the mashup end up in enriched_tracks.
+            # Enrich additional mashup components as new source rows so both sides
+            # of the mashup end up in enriched_tracks.
             for v_title, v_artist, v_match, v_score in split_extras:
                 v_bk = _base_key(v_artist, v_title)
                 if v_bk in seen_base_titles:
                     continue
                 v_meta = _bp_meta(v_match)
-                v_extras: dict = {}
-                try:
-                    full_v = beatport.get_track(v_meta["beatport_id"])
-                    if full_v:
-                        label_obj = (full_v.get("release") or {}).get("label") or {}
-                        sub_genre_obj = full_v.get("sub_genre") or {}
-                        v_extras = {
-                            "mix_name": full_v.get("mix_name"),
-                            "label": label_obj.get("name") if isinstance(label_obj, dict) else None,
-                            "catalog_number": full_v.get("catalog_number"),
-                            "isrc": full_v.get("isrc"),
-                            "sub_genre": sub_genre_obj.get("name") if isinstance(sub_genre_obj, dict) else None,
-                            "length_ms": full_v.get("length_ms"),
-                        }
-                except Exception:
-                    pass
-                new_id = detect_db.insert_track(
-                    {"artist": v_artist, "title": v_title},
-                    source=track["source"],
-                )
-                detect_db.upsert_enriched(new_id, v_meta, extras=v_extras)
+                v_extras = _fetch_extras(beatport, v_meta["beatport_id"])
+                new_id = adapter.insert_extra(v_artist, v_title, track["source"])
+                adapter.save_enriched(new_id, v_meta, v_extras)
                 seen_base_titles[v_bk] = v_meta["beatport_id"]
-                counts["found"] += 1
+                counts["mashup_extra"] += 1
                 _log(
                     f"enriched  {v_artist} — {v_title}  →  bp:{v_meta['beatport_id']}  score={v_score:.2f}  [mashup split]",
                     f"[green]enriched:[/green] {v_artist} — {v_title}  →  {v_meta['beatport_link']}  [mashup split]",
@@ -416,10 +468,10 @@ def run_enrich(
     http_client.close()
 
     if not dry_run:
-        detect_db.finish_enrich_run(
+        adapter.finish_run(
             run_id,
             seen=counts["seen"],
-            found=counts["found"],
+            found=counts["found"] + counts["mashup_extra"],
             not_found=counts["not_found"],
             fuzzy_miss=counts["fuzzy_miss"],
             duplicate=counts["duplicate"],
@@ -434,6 +486,8 @@ def run_enrich(
         f"no_results:    {counts['not_found']}",
         f"fuzzy_miss:    {counts['fuzzy_miss']}",
         f"search_errors: {counts['failed']}",
+        f"mashup_extra:  {counts['mashup_extra']}",
+        f"total_rows:    {counts['found'] + counts['mashup_extra']}",
     ]
     for line in summary:
         log_file.write(line + "\n")
@@ -450,4 +504,7 @@ def run_enrich(
     console.print(f"  No results:    {counts['not_found']}")
     console.print(f"  Fuzzy miss:    {counts['fuzzy_miss']}")
     console.print(f"  Search errors: {counts['failed']}")
+    if counts["mashup_extra"]:
+        console.print(f"  Mashup extra:  {counts['mashup_extra']}  [dim](new rows from mashup splits)[/dim]")
+        console.print(f"  Total rows:    {counts['found'] + counts['mashup_extra']}")
     console.print(f"[dim]Log: {log_path}[/dim]")

@@ -1,0 +1,18 @@
+# ~/Music/dj/ — tool-generated file layout. Source: README top section.
+# Render: d2 --theme 0 --dark-theme 200 --pad 20 storage-layout.d2 storage-layout.svg
+
+direction: right
+
+root: "~/Music/dj/" {
+  db: "dj.db\nSQLite — all tables" {
+    shape: cylinder
+  }
+  logs: "logs/<command>/\nYYYY-MM-DD_<id>.log — one per run"
+  state: "state/\nsession files, config, Beatport browser profile"
+  cache: "cache/musickit/\nSwift bridge build cache"
+  exports: "exports/\ndefault for export-* helpers"
+  backups: "backups/" {
+    am: "apple-music/\ndefault for backup_apple_music helper"
+    rb: "rekordbox/\nmaster.db pre-write backups"
+  }
+}

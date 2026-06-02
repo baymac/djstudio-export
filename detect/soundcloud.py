@@ -199,7 +199,7 @@ def _list_set_tracks_via_ytdlp(url: str) -> list[dict]:
         track_url = info.get("webpage_url") or info.get("url") or ""
         # Flat-playlist for SoundCloud sets omits title/uploader fields; we
         # fall back to URL-slug derivation so enrichment has something to
-        # fuzzy-match. Stage 3 (Beatport enrich) is the source of truth for
+        # fuzzy-match. Beatport enrich (`dj enrich`) is the source of truth for
         # the real artist/title anyway.
         if raw_title or uploader:
             artist, title = parse_artist_title(raw_title, uploader)

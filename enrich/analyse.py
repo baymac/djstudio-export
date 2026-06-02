@@ -31,7 +31,7 @@ from rich.progress import (
 
 from caffeinate import caffeinate
 from detect import db as detect_db
-from detect.studio_sdk import (
+from enrich.studio_sdk import (
     MAX_FAILURE_ATTEMPTS,
     MIK_CAMELOT_INT_TO_STR,
     MIN_DURATION_MS,

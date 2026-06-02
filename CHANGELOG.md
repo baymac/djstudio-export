@@ -2,6 +2,29 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.5.0] - 2026-06-02
+
+### Added
+- **`dj export set <id> --to bp_chart|bp_playlist|rekordbox`** — push a stored set's tracks, in set order, to a publishable Beatport chart (created as an unpublished draft), a Beatport playlist, or a rekordbox playlist. `--name` overrides the destination name; `--description` (chart only) defaults to a line built from the set's mood/duration/archetype; every destination accepts `--dry-run`.
+- **`dj-set-builder` skill + `helpers/build_set.py`** — curate and sequence a DJ set from the analysed library along an energy-curve **archetype** (11 to start: warm-up, peak-time, late-night, closing, club-night, sunset, party, dark, festival, dinner, morning-coffee), each with default genres and a multi-phase non-monotonic intensity curve. Sequencing walks a **composite intensity** (`0.60·mik_nrg + 0.25·bpm + 0.15·drum/bass drive`, pool-relative) greedily while keeping tracks Camelot-harmonic and tempo-smooth, matching stem texture to each phase, and spacing artists/labels. Track count is clamped to `[duration/5, duration/2]`. The set is stored in the new `dj_sets` / `dj_set_tracks` tables (provenance in `params_json`) and addressed by a returned id; building is fully decoupled from export.
+- **`--date-blend` proportional release-date mix** — any number of date ranges each with a ratio (`[{"from","to","ratio"}...]`); the set is filled to ~each ratio (capped to pool supply, shortfall refilled). Omitting it applies the default 75% ≤1yr / 12.5% 1–2yr / 12.5% older blend. The skill turns free text ("may 2026 50%, jan 30%, feb 20%") into this JSON.
+- **`dj export beatport|rekordbox --query SQL --name NAME`** — ad-hoc SQL-curated push (the former `dj playlist`), now living under `dj export` alongside `set`.
+- **Beatport chart support** — new chart API methods (`list_my_charts`, `create_chart`, `update_chart`, `list_chart_track_ids`, `add_chart_track`) so charts can be created, reused, and filled in order without disturbing playlists.
+- Auto-saved credentials for `detect instagram` / `detect mixcloud` — a successful (or freshly provided) login is persisted and reused on the next run.
+
+### Changed
+- **Push targets consolidated under `export/`** — `playlist/to_beatport.py` and `playlist/to_rekordbox.py` are now `export/to_beatport.py` and `export/to_rekordbox.py`, the single home for "write tracks to a destination" shared by all `dj export` verbs. `playlist/` now only carries `query.py` (SQL → rows), consumed by the export query verbs.
+- **`dj playlist` retired → `dj export`** — `dj playlist beatport|rekordbox` became `dj export beatport|rekordbox` (same `--query`/`--name`/`--dry-run` flags). Top-level `dj playlist` is removed.
+- SoundCloud auth is now automatic from `SOUNDCLOUD_CLIENT_ID/SECRET`; the one-time user-OAuth flow is the `connections.soundcloud.login_user()` helper rather than a CLI command.
+
+### Removed
+- **Rekordbox phrase round-trip** — `detect export-to-rekordbox` (Stage 6a) and `detect import-rekordbox-analysis` (Stage 6b) and their modules. The `rk_analysis_json` / `rekordbox_export_at` / `rekordbox_analysis_at` columns remain for pre-existing data but are no longer written, and `playlist/query.py` no longer selects `rk_analysis_json`. Push a curated set to rekordbox with `dj export set <id> --to rekordbox`.
+- **Read-only browse commands** — `detect history`, `detect sessions`, all `detect *-history`, `detect enriched`, `detect enrich-runs`, `detect enrich-tracks`. Query `~/Music/dj/dj.db` directly for inspection. The mutating `detect *-delete-session` commands stay.
+- **`detect login-instagram` / `login-mixcloud` / `login-soundcloud`** — folded into the detect/auth flow (see Changed / auto-saved credentials above).
+
+### Fixed
+- `.gitignore` no longer carries a stray trailing backslash on the `!package.json` rule; the `dj-set-builder` skill is now tracked instead of ignored.
+
 ## [0.1.4.0] - 2026-05-29
 
 ### Added

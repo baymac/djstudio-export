@@ -1,11 +1,11 @@
 """Shared utilities for driving DJ Studio's bundled SDK headlessly.
 
-Used by `dj detect studio-analyse` to populate enriched_tracks_analysis. Does
+Used by `dj enrich analyse` to populate enriched_tracks_analysis. Does
 not write anything to DJ Studio's own filesystem — the SDK is purely an
 analysis engine here.
 
 Requires DJ Studio to be QUIT — its SDK conflicts with our use (port 61894 +
-.beatport/ cache locks). The Node helper is detect/dj_studio_sdk.js.
+.beatport/ cache locks). The Node helper is enrich/dj_studio_sdk.js.
 
 Flow per track:
   1. SdkHelper sends {cmd: analyze, beatport_id} to the long-running Node helper.
@@ -39,7 +39,7 @@ console = Console()
 # ── Paths ─────────────────────────────────────────────────────────────────────
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
-NODE_HELPER = REPO_ROOT / "detect" / "dj_studio_sdk.js"
+NODE_HELPER = REPO_ROOT / "enrich" / "dj_studio_sdk.js"
 
 # DJ Studio token decrypt
 _DJS_ENC_KEY = bytes.fromhex(

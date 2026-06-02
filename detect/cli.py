@@ -42,11 +42,9 @@ from .db import (
     insert_track,
     insert_tracks,
     list_sessions,
-    list_tracks,
     migrate,
     remove_tracks_from_session,
     tracks_for_session,
-    tracks_for_session_enriched,
     update_session_progress,
     upsert_shazam_slice,
 )
@@ -1470,10 +1468,9 @@ Examples:
   uv run dj_cli.py detect podbean https://www.podbean.com/ew/pb-XXXX
   uv run dj_cli.py detect reddit https://www.reddit.com/r/HypeTracks/comments/XXXXX/
   uv run dj_cli.py detect 1001tracklists https://www.1001tracklists.com/tracklist/XXXXX/
-  uv run dj_cli.py detect history -n 50
-  uv run dj_cli.py detect mixcloud-history
-  uv run dj_cli.py detect reddit-history
-  uv run dj_cli.py detect 1001tracklists-history
+  uv run dj_cli.py detect gems --source beatport --genre "Tech House" --count 10
+
+  (enrich detected tracks afterwards with: uv run dj_cli.py enrich --detect)
 """,
     )
     sub = detect_p.add_subparsers(dest="detect_command")
@@ -1565,10 +1562,6 @@ Examples:
     rd_p.add_argument("--dry-run", action="store_true",
                       help="Run detection but skip all DB writes")
 
-    # reddit-history
-    rd_hist_p = sub.add_parser("reddit-history", help="Browse Reddit post scans")
-    rd_hist_p.add_argument("-n", "--limit", type=int, default=20)
-
     # reddit-delete-session
     rd_del_p = sub.add_parser("reddit-delete-session", help="Delete a Reddit session and its tracks")
     rd_del_p.add_argument("session_id", type=int)
@@ -1579,10 +1572,6 @@ Examples:
     td_p.add_argument("url", help="topdjmixes.com mix URL")
     td_p.add_argument("--dry-run", action="store_true",
                       help="Run detection but skip all DB writes")
-
-    # topdjmixes-history
-    td_hist_p = sub.add_parser("topdjmixes-history", help="Browse topdjmixes mix scans")
-    td_hist_p.add_argument("-n", "--limit", type=int, default=20)
 
     # topdjmixes-delete-session
     td_del_p = sub.add_parser("topdjmixes-delete-session",
@@ -1600,10 +1589,6 @@ Examples:
     tl_p.add_argument("--browser", choices=["brave", "chrome", "safari", "firefox"],
                       default="brave", help="Browser to read 1001tracklists cookies from (default: brave)")
 
-    # 1001tracklists-history
-    tl_hist_p = sub.add_parser("1001tracklists-history", help="Browse 1001tracklists scans")
-    tl_hist_p.add_argument("-n", "--limit", type=int, default=20)
-
     # 1001tracklists-delete-session
     tl_del_p = sub.add_parser("1001tracklists-delete-session",
                                help="Delete a 1001tracklists session and its tracks")
@@ -1618,60 +1603,26 @@ Examples:
     tx_p.add_argument("--dry-run", action="store_true",
                       help="Run detection but skip all DB writes")
 
-    # text-history
-    tx_hist_p = sub.add_parser("text-history", help="Browse text-paste sessions")
-    tx_hist_p.add_argument("-n", "--limit", type=int, default=20)
-
     # text-delete-session
     tx_del_p = sub.add_parser("text-delete-session", help="Delete a text session and its tracks")
     tx_del_p.add_argument("session_id", type=int)
     tx_del_p.add_argument("--force", "-f", action="store_true", help="Skip confirmation prompt")
-
-    # history
-    hist_p = sub.add_parser("history", help="Show all detected tracks from every source")
-    hist_p.add_argument("-n", "--limit", type=int, default=20, help="Number of tracks to show")
-
-    # instagram-history
-    ig_hist_p = sub.add_parser("instagram-history", help="Browse detected Instagram posts and tracks")
-    ig_hist_p.add_argument("-n", "--limit", type=int, default=20)
-    ig_hist_p.add_argument("--tracks", "-t", action="store_true", dest="tracks_only",
-                            help="Show flat track list instead of grouped by post")
-
-    # radio-garden-history (alias: radio-history)
-    rg_hist_p = sub.add_parser("radio-history", help="Browse radio.garden monitoring sessions")
-    rg_hist_p.add_argument("-n", "--limit", type=int, default=10)
-
-    # mixcloud-history
-    mc_hist_p = sub.add_parser("mixcloud-history", help="Browse Mixcloud mix scans")
-    mc_hist_p.add_argument("-n", "--limit", type=int, default=10)
 
     # mixcloud-delete-session
     mc_del_p = sub.add_parser("mixcloud-delete-session", help="Delete a Mixcloud session and its tracks")
     mc_del_p.add_argument("session_id", type=int)
     mc_del_p.add_argument("--force", "-f", action="store_true", help="Skip confirmation prompt")
 
-    # youtube-history
-    yt_hist_p = sub.add_parser("youtube-history", help="Browse YouTube video scans")
-    yt_hist_p.add_argument("-n", "--limit", type=int, default=10)
-
     # youtube-delete-session
     yt_del_p = sub.add_parser("youtube-delete-session", help="Delete a YouTube session and its tracks")
     yt_del_p.add_argument("session_id", type=int)
     yt_del_p.add_argument("--force", "-f", action="store_true", help="Skip confirmation prompt")
-
-    # soundcloud-history
-    sc_hist_p = sub.add_parser("soundcloud-history", help="Browse SoundCloud mix scans")
-    sc_hist_p.add_argument("-n", "--limit", type=int, default=10)
 
     # soundcloud-delete-session
     sc_del_p = sub.add_parser("soundcloud-delete-session",
                               help="Delete a SoundCloud session and its tracks")
     sc_del_p.add_argument("session_id", type=int)
     sc_del_p.add_argument("--force", "-f", action="store_true", help="Skip confirmation prompt")
-
-    # podbean-history
-    pb_hist_p = sub.add_parser("podbean-history", help="Browse Podbean episode scans")
-    pb_hist_p.add_argument("-n", "--limit", type=int, default=10)
 
     # podbean-delete-session
     pb_del_p = sub.add_parser("podbean-delete-session", help="Delete a Podbean session and its tracks")
@@ -1705,143 +1656,15 @@ Examples:
         help="Fuzzy match threshold for keeping a detected track (default: 0.75)",
     )
 
-    # login-instagram
-    li_p = sub.add_parser("login-instagram", help="Save Instagram credentials and verify login")
-    li_p.add_argument("--username", "-u", default=None, help="Instagram username")
-    li_p.add_argument("--password", "-p", default=None, help="Instagram password")
-
-    # login-mixcloud
-    lm_p = sub.add_parser("login-mixcloud", help="Save Mixcloud credentials for future use")
-    lm_p.add_argument("--username", "-u", default=None, help="Mixcloud username")
-    lm_p.add_argument("--password", "-p", default=None, help="Mixcloud password")
-
-    # login-soundcloud
-    ls_p = sub.add_parser(
-        "login-soundcloud",
-        help="OAuth login (browser) — required for /discover/ personalized URLs",
-    )
-    ls_p.add_argument("--port", type=int, default=8080,
-                      help="Local port for the OAuth callback server (default: 8080)")
-
-    # enrich
-    enrich_p = sub.add_parser(
-        "enrich",
-        help="Enrich detected tracks with Beatport metadata (bpm, key, genre, release_date)",
-    )
-    enrich_p.add_argument("--dry-run", action="store_true",
-                          help="Show what would be enriched without writing to DB")
-    enrich_p.add_argument("--limit", type=int, default=0, metavar="N",
-                          help="Stop after N tracks (0 = no limit)")
-    enrich_p.add_argument("--verbose", "-v", action="store_true",
-                          help="Print Beatport search details")
-    enrich_p.add_argument("--threshold", type=float, default=0.72, metavar="F",
-                          help="Fuzzy match threshold 0-1 (default: 0.72)")
-    enrich_p.add_argument("--retry-misses", "-r", action="store_true",
-                          help="Retry tracks that previously had no results or fuzzy miss")
-
-    # sync-beatport
-    sb_p = sub.add_parser(
-        "sync-beatport",
-        help="Pull Beatport playlist tracks into enriched_tracks (incremental)",
-    )
-    sb_p.add_argument("--playlist", "-p", default=None, metavar="NAME",
-                      help="Sync only this playlist (exact name). Omit to sync all.")
-    sb_p.add_argument("--dry-run", action="store_true",
-                      help="Show what would be added without writing")
-    sb_p.add_argument("--verbose", "-v", action="store_true",
-                      help="Print each track as it is added")
-    sb_p.add_argument("--limit", type=int, default=0, metavar="N",
-                      help="Stop after adding N new tracks (0 = no limit)")
-
-    # studio-analyse
-    sa_p = sub.add_parser(
-        "studio-analyse",
-        help="Run DJ Studio's SDK analysis and write directly to enriched_tracks_analysis (no DJ Studio filesystem writes).",
-    )
-    sa_p.add_argument("--ids", default=None, metavar="ID[,ID...]",
-                      help="Comma-separated beatport IDs to analyze. When set, --limit is ignored.")
-    sa_p.add_argument("--limit", type=int, default=0, metavar="N",
-                      help="Stop after N tracks (0 = no limit)")
-    sa_p.add_argument("--verbose", "-v", action="store_true")
-    sa_p.add_argument("--force", action="store_true",
-                      help="Re-process tracks even if a row already exists in enriched_tracks_analysis")
-    sa_p.add_argument("--retry-failed", action="store_true",
-                      help="Ignore the hard-failure sidecar and re-attempt tracks that previously hit MAX_FAILURE_ATTEMPTS")
-
-    # export-to-rekordbox
-    etr_p = sub.add_parser(
-        "export-to-rekordbox",
-        help="Push studio-analysed tracks into a rekordbox playlist as Beatport streaming entries (for manual analysis)",
-    )
-    etr_p.add_argument("--playlist", default="DJ Tools - Enrich",
-                       help="Playlist name in rekordbox (created if missing)")
-    etr_p.add_argument("--limit", type=int, default=0, metavar="N")
-    etr_p.add_argument("--dry-run", action="store_true")
-    etr_p.add_argument("--force", action="store_true",
-                       help="Re-push tracks even if rekordbox_export_at is already set")
-
-    # import-rekordbox-analysis
-    ira_p = sub.add_parser(
-        "import-rekordbox-analysis",
-        help="Read PSSI phrase tags + memory/hot cues from rekordbox ANLZ files into rk_analysis_json",
-    )
-    ira_p.add_argument("--limit", type=int, default=0, metavar="N")
-    ira_p.add_argument("--force", action="store_true",
-                       help="Re-ingest even if rekordbox_analysis_at is already set")
-    ira_p.add_argument("--verbose", "-v", action="store_true")
-
     # spotify
     sp_p = sub.add_parser("spotify", help="Import tracks from a Spotify playlist into detected_tracks")
     sp_p.add_argument("url_or_name", help="Spotify playlist URL or playlist name to search for")
-
-    # spotify-history
-    sp_hist_p = sub.add_parser("spotify-history", help="Browse Spotify playlist imports")
-    sp_hist_p.add_argument("-n", "--limit", type=int, default=10)
 
     # spotify-delete-session
     sp_del_p = sub.add_parser("spotify-delete-session",
                               help="Delete a Spotify playlist session and its tracks")
     sp_del_p.add_argument("session_id", type=int)
     sp_del_p.add_argument("--force", "-f", action="store_true", help="Skip confirmation prompt")
-
-    # sessions
-    _TYPES = ("youtube", "instagram", "mixcloud", "radio", "podbean", "reddit", "topdjmixes", "soundcloud", "text", "spotify", "1001tracklists")
-    sess_p = sub.add_parser(
-        "sessions",
-        help="List all sessions for a source type, or detected tracks for one session",
-    )
-    sess_p.add_argument("type", choices=_TYPES, metavar="TYPE",
-                        help=f"Source type: {', '.join(_TYPES)}")
-    sess_p.add_argument("session_id", nargs="?", type=int, default=None,
-                        help="If given, show detected tracks for this session id; else list sessions.")
-    sess_p.add_argument("-n", "--limit", type=int, default=20)
-
-    # enriched
-    enriched_p = sub.add_parser(
-        "enriched",
-        help="List all enriched tracks, newest first",
-    )
-    enriched_p.add_argument("-n", "--limit", type=int, default=50,
-                            help="Max rows to show (default: 50)")
-    enriched_p.add_argument("--playlist", "-p", default=None, metavar="NAME",
-                            help="Filter to tracks from a specific Beatport playlist")
-
-    # enrich-runs
-    eh_p = sub.add_parser(
-        "enrich-runs",
-        help="Show past enrich run summaries",
-    )
-    eh_p.add_argument("-n", "--limit", type=int, default=20,
-                      help="Max runs to show (default: 20)")
-
-    # enrich-tracks
-    st_p = sub.add_parser(
-        "enrich-tracks",
-        help="Show all tracks for a session with enrichment data (fuzzy_miss flagged with ~)",
-    )
-    st_p.add_argument("type", choices=_TYPES, metavar="TYPE",
-                      help=f"Source type: {', '.join(_TYPES)}")  # _TYPES defined above
-    st_p.add_argument("session_id", type=int)
 
     return detect_p
 
@@ -1910,22 +1733,6 @@ def dispatch(args, detect_p: argparse.ArgumentParser) -> None:
         else:
             console.print("\n[yellow](dry run — nothing saved)[/yellow]")
 
-    elif cmd == "reddit-history":
-        sessions = list_sessions("reddit", args.limit)
-        if not sessions:
-            console.print("[dim]No Reddit sessions yet.[/dim]")
-            return
-        t = Table(show_header=True, header_style="bold magenta", box=None, padding=(0, 2))
-        t.add_column("ID",         style="dim", width=5)
-        t.add_column("Title",      min_width=40)
-        t.add_column("Subreddit",  min_width=16)
-        t.add_column("Scanned",    style="dim", width=19)
-        t.add_column("Tracks",     style="dim", width=7)
-        for r in sessions:
-            t.add_row(str(r["id"]), r["title"] or "—", r["uploader"] or "—",
-                      r["started_at"][:19], str(r["track_count"]))
-        console.print(t)
-
     elif cmd == "reddit-delete-session":
         session_id = args.session_id
         rows = tracks_for_session(session_id)
@@ -1989,22 +1796,6 @@ def dispatch(args, detect_p: argparse.ArgumentParser) -> None:
         else:
             console.print("\n[yellow](dry run — nothing saved)[/yellow]")
 
-    elif cmd == "topdjmixes-history":
-        sessions = list_sessions("topdjmixes", args.limit)
-        if not sessions:
-            console.print("[dim]No topdjmixes sessions yet.[/dim]")
-            return
-        t = Table(show_header=True, header_style="bold magenta", box=None, padding=(0, 2))
-        t.add_column("ID",      style="dim", width=5)
-        t.add_column("Mix",     min_width=40)
-        t.add_column("DJ",      min_width=18)
-        t.add_column("Scanned", style="dim", width=19)
-        t.add_column("Tracks",  style="dim", width=7)
-        for r in sessions:
-            t.add_row(str(r["id"]), r["title"] or "—", r["uploader"] or "—",
-                      r["started_at"][:19], str(r["track_count"]))
-        console.print(t)
-
     elif cmd == "topdjmixes-delete-session":
         session_id = args.session_id
         rows = tracks_for_session(session_id)
@@ -2023,9 +1814,10 @@ def dispatch(args, detect_p: argparse.ArgumentParser) -> None:
         if not args.dry_run:
             prior = find_session(url)
             if prior:
+                n_tracks = len(tracks_for_session(prior["id"]))
                 console.print(
                     f"[yellow]Already scanned:[/yellow] {prior['title'] or url} "
-                    f"(session #{prior['id']}, {prior['track_count']} tracks)"
+                    f"(session #{prior['id']}, {n_tracks} track(s))"
                 )
                 if not _confirm("Scan again?", default=False):
                     sys.exit(0)
@@ -2088,20 +1880,6 @@ def dispatch(args, detect_p: argparse.ArgumentParser) -> None:
             console.print(f"\n[dim]Saved to DB (session #{session_id})[/dim]")
         else:
             console.print("\n[yellow](dry run — nothing saved)[/yellow]")
-
-    elif cmd == "1001tracklists-history":
-        sessions = list_sessions("1001tracklists", args.limit)
-        if not sessions:
-            console.print("[dim]No 1001tracklists sessions yet.[/dim]")
-            return
-        t = Table(show_header=True, header_style="bold magenta", box=None, padding=(0, 2))
-        t.add_column("ID",      style="dim", width=5)
-        t.add_column("Title",   min_width=44)
-        t.add_column("Scanned", style="dim", width=19)
-        t.add_column("Tracks",  style="dim", width=7)
-        for r in sessions:
-            t.add_row(str(r["id"]), r["title"] or "—", r["started_at"][:19], str(r["track_count"]))
-        console.print(t)
 
     elif cmd == "1001tracklists-delete-session":
         session_id = args.session_id
@@ -2168,20 +1946,6 @@ def dispatch(args, detect_p: argparse.ArgumentParser) -> None:
         else:
             console.print("\n[yellow](dry run — nothing saved)[/yellow]")
 
-    elif cmd == "text-history":
-        sessions = list_sessions("text", args.limit)
-        if not sessions:
-            console.print("[dim]No text sessions yet.[/dim]")
-            return
-        t = Table(show_header=True, header_style="bold magenta", box=None, padding=(0, 2))
-        t.add_column("ID",      style="dim", width=5)
-        t.add_column("Name",    min_width=40)
-        t.add_column("Scanned", style="dim", width=19)
-        t.add_column("Tracks",  style="dim", width=7)
-        for r in sessions:
-            t.add_row(str(r["id"]), r["title"] or "—", r["started_at"][:19], str(r["track_count"]))
-        console.print(t)
-
     elif cmd == "text-delete-session":
         session_id = args.session_id
         rows = tracks_for_session(session_id)
@@ -2205,6 +1969,9 @@ def dispatch(args, detect_p: argparse.ArgumentParser) -> None:
             password = getpass.getpass("Instagram password: ")
         asyncio.run(_run(args.url, username, password, args.output, args.json_output,
                          dry_run=args.dry_run))
+        # Auto-save so the next run logs in without prompting (login just succeeded).
+        if username and password and (username, password) != (saved_u, saved_p):
+            _save_credentials(username, password, service="instagram")
 
     elif cmd == "radio-garden":
         if args.capture >= args.interval:
@@ -2222,6 +1989,10 @@ def dispatch(args, detect_p: argparse.ArgumentParser) -> None:
         saved_u, saved_p = _load_saved_credentials(service="mixcloud")
         username = args.username or os.environ.get("MC_USERNAME") or saved_u
         password = args.password or os.environ.get("MC_PASSWORD") or saved_p
+        # Auto-save freshly provided creds so the next run reuses them (Mixcloud
+        # auth is optional; yt-dlp validates them at download time).
+        if username and password and (username, password) != (saved_u, saved_p):
+            _save_credentials(username, password, service="mixcloud")
 
         resume_session_id: int | None = None
         resume_from: int = 0
@@ -2425,120 +2196,6 @@ def dispatch(args, detect_p: argparse.ArgumentParser) -> None:
                                  resume_session_id=resume_session_id, resume_from=resume_from,
                                  dry_run=args.dry_run))
 
-    elif cmd == "history":
-        rows = list_tracks(args.limit)
-        if not rows:
-            console.print("[dim]No tracks stored yet.[/dim]")
-            return
-        t = Table(show_header=True, header_style="bold magenta", box=None, padding=(0, 2))
-        t.add_column("ID", style="dim", width=5)
-        t.add_column("Source", style="dim", width=12)
-        t.add_column("Artist", min_width=22)
-        t.add_column("Title", min_width=28)
-        t.add_column("Apple Music", min_width=40)
-        t.add_column("Detected", style="dim", min_width=20)
-        for r in rows:
-            t.add_row(
-                str(r["id"]), r["source"] or "—", r["artist"] or "—", r["title"] or "—",
-                r["apple_music_url"] or "—", r["synced_at"][:19],
-            )
-        console.print(t)
-
-    elif cmd == "instagram-history":
-        if args.tracks_only:
-            rows = [r for r in list_tracks(args.limit) if (r["source"] or "") == "instagram"]
-            if not rows:
-                console.print("[dim]No Instagram tracks stored yet.[/dim]")
-                return
-            t = Table(show_header=True, header_style="bold magenta", box=None, padding=(0, 2))
-            t.add_column("ID", style="dim", width=5)
-            t.add_column("Artist", min_width=22)
-            t.add_column("Title", min_width=28)
-            t.add_column("Apple Music", min_width=40)
-            t.add_column("Detected", style="dim", min_width=20)
-            for r in rows:
-                t.add_row(str(r["id"]), r["artist"] or "—", r["title"] or "—",
-                          r["apple_music_url"] or "—", r["synced_at"][:19])
-            console.print(t)
-            return
-
-        sessions = list_sessions("instagram", args.limit)
-        if not sessions:
-            console.print("[dim]No Instagram posts stored yet.[/dim]")
-            return
-        for s in sessions:
-            caption_preview = (s["caption"] or "")[:80].replace("\n", " ")
-            console.print(
-                f"\n[bold cyan]#{s['id']}[/bold cyan]  {s['url']}\n"
-                f"  [dim]detected:[/dim] {s['started_at'][:19]}\n"
-                f"  [dim]{caption_preview}{'…' if len(s['caption'] or '') > 80 else ''}[/dim]"
-            )
-            tracks = tracks_for_session(s["id"])
-            if tracks:
-                t = Table(show_header=False, box=None, padding=(0, 3))
-                t.add_column("#", style="dim", width=4)
-                t.add_column("Artist", min_width=20)
-                t.add_column("Title", min_width=25)
-                t.add_column("Apple Music", min_width=38)
-                for r in tracks:
-                    t.add_row(str(r["position"] or ""), r["artist"] or "—",
-                              r["title"] or "—", r["apple_music_url"] or "—")
-                console.print(t)
-
-    elif cmd == "radio-history":
-        rows = list_sessions("radio", args.limit)
-        if not rows:
-            console.print("[dim]No radio sessions yet. Run [bold]dj detect radio-garden <url>[/bold] to start.[/dim]")
-            return
-        for s in rows:
-            ended = s["ended_at"][:19] if s["ended_at"] else "ongoing"
-            console.print(
-                f"\n[bold cyan]Session #{s['id']}[/bold cyan]  [bold]{s['title']}[/bold]\n"
-                f"  [dim]started:[/dim] {s['started_at'][:19]}  [dim]ended:[/dim] {ended}\n"
-                f"  [dim]{s['url']}[/dim]"
-            )
-            tracks = tracks_for_session(s["id"])
-            if tracks:
-                t = Table(show_header=False, box=None, padding=(0, 3))
-                t.add_column("Time", style="dim", min_width=20)
-                t.add_column("Artist", min_width=22)
-                t.add_column("Title", min_width=28)
-                t.add_column("Apple Music", min_width=38)
-                for r in tracks:
-                    t.add_row(r["synced_at"][:19], r["artist"] or "—", r["title"] or "—",
-                              r["apple_music_url"] or "—")
-                console.print(t)
-            else:
-                console.print("  [dim](no tracks detected)[/dim]")
-
-    elif cmd == "mixcloud-history":
-        rows = list_sessions("mixcloud", args.limit)
-        if not rows:
-            console.print("[dim]No Mixcloud sessions yet. Run [bold]dj detect mixcloud <url>[/bold] to start.[/dim]")
-            return
-        for s in rows:
-            ended = s["ended_at"][:19] if s["ended_at"] else "ongoing"
-            dur = f"  [dim]duration:[/dim] {_fmt_time(s['duration_seconds'])}" if s["duration_seconds"] else ""
-            console.print(
-                f"\n[bold cyan]Session #{s['id']}[/bold cyan]  [bold]{s['title']}[/bold]\n"
-                f"  [dim]uploader:[/dim] {s['uploader'] or '?'}  "
-                f"[dim]scanned:[/dim] {s['started_at'][:19]}  [dim]ended:[/dim] {ended}{dur}"
-            )
-            tracks = tracks_for_session(s["id"])
-            if tracks:
-                t = Table(show_header=False, box=None, padding=(0, 3))
-                t.add_column("Time", style="dim", width=8)
-                t.add_column("Artist", min_width=22)
-                t.add_column("Title", min_width=28)
-                t.add_column("Apple Music", min_width=38)
-                for r in tracks:
-                    pos = r["position"]
-                    t.add_row(_fmt_time(pos) if isinstance(pos, int) else "—",
-                              r["artist"] or "—", r["title"] or "—", r["apple_music_url"] or "—")
-                console.print(t)
-            else:
-                console.print("  [dim](no tracks detected)[/dim]")
-
     elif cmd == "mixcloud-delete-session":
         rows = list_sessions("mixcloud", 100)
         session = next((r for r in rows if r["id"] == args.session_id), None)
@@ -2554,34 +2211,6 @@ def dispatch(args, detect_p: argparse.ArgumentParser) -> None:
             sys.exit(0)
         delete_session(args.session_id)
         console.print(f"[green]✓[/green] Deleted session #{args.session_id} and {n_tracks} track(s).")
-
-    elif cmd == "youtube-history":
-        rows = list_sessions("youtube", args.limit)
-        if not rows:
-            console.print("[dim]No YouTube sessions yet. Run [bold]dj detect youtube <url>[/bold] to start.[/dim]")
-            return
-        for s in rows:
-            ended = s["ended_at"][:19] if s["ended_at"] else "ongoing"
-            dur = f"  [dim]duration:[/dim] {_fmt_time(s['duration_seconds'])}" if s["duration_seconds"] else ""
-            console.print(
-                f"\n[bold cyan]Session #{s['id']}[/bold cyan]  [bold]{s['title']}[/bold]\n"
-                f"  [dim]uploader:[/dim] {s['uploader'] or '?'}  "
-                f"[dim]scanned:[/dim] {s['started_at'][:19]}  [dim]ended:[/dim] {ended}{dur}"
-            )
-            tracks = tracks_for_session(s["id"])
-            if tracks:
-                t = Table(show_header=False, box=None, padding=(0, 3))
-                t.add_column("Time", style="dim", width=8)
-                t.add_column("Artist", min_width=22)
-                t.add_column("Title", min_width=28)
-                t.add_column("Apple Music", min_width=38)
-                for r in tracks:
-                    pos = r["position"]
-                    t.add_row(_fmt_time(pos) if isinstance(pos, int) else "—",
-                              r["artist"] or "—", r["title"] or "—", r["apple_music_url"] or "—")
-                console.print(t)
-            else:
-                console.print("  [dim](no tracks detected)[/dim]")
 
     elif cmd == "youtube-delete-session":
         rows = list_sessions("youtube", 100)
@@ -2599,34 +2228,6 @@ def dispatch(args, detect_p: argparse.ArgumentParser) -> None:
         delete_session(args.session_id)
         console.print(f"[green]✓[/green] Deleted session #{args.session_id} and {n_tracks} track(s).")
 
-    elif cmd == "soundcloud-history":
-        rows = list_sessions("soundcloud", args.limit)
-        if not rows:
-            console.print("[dim]No SoundCloud sessions yet. Run [bold]dj detect soundcloud <url>[/bold] to start.[/dim]")
-            return
-        for s in rows:
-            ended = s["ended_at"][:19] if s["ended_at"] else "ongoing"
-            dur = f"  [dim]duration:[/dim] {_fmt_time(s['duration_seconds'])}" if s["duration_seconds"] else ""
-            console.print(
-                f"\n[bold cyan]Session #{s['id']}[/bold cyan]  [bold]{s['title']}[/bold]\n"
-                f"  [dim]uploader:[/dim] {s['uploader'] or '?'}  "
-                f"[dim]scanned:[/dim] {s['started_at'][:19]}  [dim]ended:[/dim] {ended}{dur}"
-            )
-            tracks = tracks_for_session(s["id"])
-            if tracks:
-                t = Table(show_header=False, box=None, padding=(0, 3))
-                t.add_column("Time", style="dim", width=8)
-                t.add_column("Artist", min_width=22)
-                t.add_column("Title", min_width=28)
-                t.add_column("Apple Music", min_width=38)
-                for r in tracks:
-                    pos = r["position"]
-                    t.add_row(_fmt_time(pos) if isinstance(pos, int) else "—",
-                              r["artist"] or "—", r["title"] or "—", r["apple_music_url"] or "—")
-                console.print(t)
-            else:
-                console.print("  [dim](no tracks detected)[/dim]")
-
     elif cmd == "soundcloud-delete-session":
         rows = list_sessions("soundcloud", 100)
         session = next((r for r in rows if r["id"] == args.session_id), None)
@@ -2643,34 +2244,6 @@ def dispatch(args, detect_p: argparse.ArgumentParser) -> None:
         delete_session(args.session_id)
         console.print(f"[green]✓[/green] Deleted session #{args.session_id} and {n_tracks} track(s).")
 
-    elif cmd == "podbean-history":
-        rows = list_sessions("podbean", args.limit)
-        if not rows:
-            console.print("[dim]No Podbean sessions yet. Run [bold]dj detect podbean <url>[/bold] to start.[/dim]")
-            return
-        for s in rows:
-            ended = s["ended_at"][:19] if s["ended_at"] else "ongoing"
-            dur = f"  [dim]duration:[/dim] {_fmt_time(s['duration_seconds'])}" if s["duration_seconds"] else ""
-            console.print(
-                f"\n[bold cyan]Session #{s['id']}[/bold cyan]  [bold]{s['title']}[/bold]\n"
-                f"  [dim]uploader:[/dim] {s['uploader'] or '?'}  "
-                f"[dim]scanned:[/dim] {s['started_at'][:19]}  [dim]ended:[/dim] {ended}{dur}"
-            )
-            tracks = tracks_for_session(s["id"])
-            if tracks:
-                t = Table(show_header=False, box=None, padding=(0, 3))
-                t.add_column("Time", style="dim", width=8)
-                t.add_column("Artist", min_width=22)
-                t.add_column("Title", min_width=28)
-                t.add_column("Apple Music", min_width=38)
-                for r in tracks:
-                    pos = r["position"]
-                    t.add_row(_fmt_time(pos) if isinstance(pos, int) else "—",
-                              r["artist"] or "—", r["title"] or "—", r["apple_music_url"] or "—")
-                console.print(t)
-            else:
-                console.print("  [dim](no tracks detected)[/dim]")
-
     elif cmd == "podbean-delete-session":
         rows = list_sessions("podbean", 100)
         session = next((r for r in rows if r["id"] == args.session_id), None)
@@ -2686,38 +2259,6 @@ def dispatch(args, detect_p: argparse.ArgumentParser) -> None:
             sys.exit(0)
         delete_session(args.session_id)
         console.print(f"[green]✓[/green] Deleted session #{args.session_id} and {n_tracks} track(s).")
-
-    elif cmd == "login-instagram":
-        username = args.username or os.environ.get("IG_USERNAME") or input("Instagram username: ")
-        password = args.password or os.environ.get("IG_PASSWORD") or getpass.getpass("Instagram password: ")
-        console.print("[dim]Logging into Instagram…[/dim]")
-        try:
-            build_client(username, password,
-                         challenge_handler=_challenge_handler,
-                         two_factor_handler=_two_factor_handler)
-        except Exception as exc:
-            console.print(f"[red]Login failed:[/red] {exc}")
-            sys.exit(1)
-        _save_credentials(username, password, service="instagram")
-        console.print(f"[green]✓[/green] Logged in. Credentials saved to {CONFIG_FILE}")
-
-    elif cmd == "login-mixcloud":
-        username = args.username or os.environ.get("MC_USERNAME") or input("Mixcloud username: ")
-        password = args.password or os.environ.get("MC_PASSWORD") or getpass.getpass("Mixcloud password: ")
-        _save_credentials(username, password, service="mixcloud")
-        console.print(f"[green]✓[/green] Mixcloud credentials saved to {CONFIG_FILE}")
-
-    elif cmd == "login-soundcloud":
-        from connections import soundcloud as sc_api
-        try:
-            sc_api.login_user(port=args.port)
-        except sc_api.SoundCloudError as exc:
-            console.print(f"[red]Login failed:[/red] {exc}")
-            sys.exit(1)
-        console.print(
-            "[green]✓[/green] SoundCloud user OAuth complete. "
-            "Personalized /discover/ URLs are now supported."
-        )
 
     elif cmd == "gems":
         from detect.gems import DATE_KEYS, DATE_DAYS, run_gems
@@ -2736,31 +2277,6 @@ def dispatch(args, detect_p: argparse.ArgumentParser) -> None:
         from detect.spotify import run_spotify_playlist
         run_spotify_playlist(args.url_or_name)
 
-    elif cmd == "spotify-history":
-        rows = list_sessions("spotify", args.limit)
-        if not rows:
-            console.print("[dim]No Spotify sessions yet. Run [bold]dj detect spotify <url-or-name>[/bold] to start.[/dim]")
-            return
-        for s in rows:
-            ended = s["ended_at"][:19] if s["ended_at"] else "ongoing"
-            console.print(
-                f"\n[bold cyan]Session #{s['id']}[/bold cyan]  [bold]{s['title']}[/bold]\n"
-                f"  [dim]owner:[/dim] {s['uploader'] or '?'}  "
-                f"[dim]imported:[/dim] {s['started_at'][:19]}  [dim]ended:[/dim] {ended}  "
-                f"[dim]tracks:[/dim] {s['track_count']}"
-            )
-            tracks = tracks_for_session(s["id"])
-            if tracks:
-                t = Table(show_header=False, box=None, padding=(0, 3))
-                t.add_column("#", style="dim", width=4)
-                t.add_column("Artist", min_width=22)
-                t.add_column("Title", min_width=28)
-                for r in tracks:
-                    t.add_row(str(r["position"] or "—"), r["artist"] or "—", r["title"] or "—")
-                console.print(t)
-            else:
-                console.print("  [dim](no tracks)[/dim]")
-
     elif cmd == "spotify-delete-session":
         rows = list_sessions("spotify", 100)
         session = next((r for r in rows if r["id"] == args.session_id), None)
@@ -2776,231 +2292,6 @@ def dispatch(args, detect_p: argparse.ArgumentParser) -> None:
             sys.exit(0)
         delete_session(args.session_id)
         console.print(f"[green]✓[/green] Deleted session #{args.session_id} and {n_tracks} track(s).")
-
-    elif cmd == "enrich":
-        from detect.enrich import run_enrich
-        run_enrich(
-            dry_run=args.dry_run,
-            limit=args.limit,
-            verbose=args.verbose,
-            threshold=args.threshold,
-            retry_misses=args.retry_misses,
-        )
-
-    elif cmd == "sync-beatport":
-        from detect.sync_beatport import run_sync_beatport
-        run_sync_beatport(dry_run=args.dry_run, verbose=args.verbose, limit=args.limit, playlist=args.playlist)
-
-    elif cmd == "studio-analyse":
-        from detect.studio_analyse import run_studio_analyse
-        ids = None
-        if args.ids:
-            try:
-                ids = [int(x.strip()) for x in args.ids.split(",") if x.strip()]
-            except ValueError:
-                console.print(f"[red]--ids must be comma-separated integers, got: {args.ids}[/red]")
-                return
-        run_studio_analyse(
-            ids=ids,
-            limit=args.limit,
-            verbose=args.verbose,
-            force=args.force,
-            retry_failed=args.retry_failed,
-        )
-
-    elif cmd == "export-to-rekordbox":
-        from detect.export_to_rekordbox import export_to_rekordbox
-        export_to_rekordbox(
-            playlist_name=args.playlist,
-            limit=args.limit,
-            dry_run=args.dry_run,
-            force=args.force,
-        )
-
-    elif cmd == "import-rekordbox-analysis":
-        from detect.import_rekordbox_analysis import run_import_rekordbox_analysis
-        run_import_rekordbox_analysis(
-            limit=args.limit,
-            force=args.force,
-            verbose=args.verbose,
-        )
-
-    elif cmd == "sessions":
-        if args.session_id is not None:
-            sess = next((s for s in list_sessions(args.type, 10000) if s["id"] == args.session_id), None)
-            if sess is None:
-                console.print(f"[red]No {args.type} session #{args.session_id}.[/red]")
-                return
-            tracks = tracks_for_session(args.session_id)
-            console.print(
-                f"\n[bold cyan]Session #{sess['id']}[/bold cyan]  [bold]{sess['title'] or '—'}[/bold]\n"
-                f"  [dim]url:[/dim] {sess['url']}\n"
-                f"  [dim]uploader:[/dim] {sess['uploader'] or '?'}  "
-                f"[dim]scanned:[/dim] {sess['started_at'][:19]}  "
-                f"[dim]tracks:[/dim] {len(tracks)}"
-            )
-            if not tracks:
-                console.print("\n[dim](no tracks detected)[/dim]")
-                return
-            t = Table(show_header=True, header_style="bold magenta", box=None, padding=(0, 2))
-            t.add_column("Pos", style="dim", width=8)
-            t.add_column("Artist", min_width=22)
-            t.add_column("Title", min_width=28)
-            t.add_column("Apple Music", min_width=38)
-            t.add_column("Outcome", style="dim", width=12)
-            for r in tracks:
-                pos = r["position"]
-                pos_s = _fmt_time(pos) if isinstance(pos, int) else (str(pos) if pos else "—")
-                t.add_row(
-                    pos_s,
-                    r["artist"] or "—",
-                    r["title"] or "—",
-                    r["apple_music_url"] or "—",
-                    r["enrich_outcome"] or "—",
-                )
-            console.print(t)
-            return
-        rows = list_sessions(args.type, args.limit)
-        if not rows:
-            console.print(f"[dim]No {args.type} sessions yet.[/dim]")
-            return
-        t = Table(show_header=True, header_style="bold magenta", box=None, padding=(0, 2))
-        if args.type == "instagram":
-            t.add_column("ID", style="dim", width=5)
-            t.add_column("URL", min_width=40)
-            t.add_column("Detected", style="dim", min_width=19)
-            t.add_column("Tracks", style="dim", width=7)
-            for r in rows:
-                t.add_row(str(r["id"]), r["url"], r["started_at"][:19], str(r["track_count"]))
-        else:
-            extra_label = {"radio": "Station", "mixcloud": "Uploader",
-                           "youtube": "Uploader", "podbean": "Podcast",
-                           "reddit": "Subreddit", "topdjmixes": "DJ",
-                           "soundcloud": "Uploader", "text": "Name",
-                           "1001tracklists": "DJ"}[args.type]
-            t.add_column("ID", style="dim", width=5)
-            t.add_column("Title", min_width=32)
-            t.add_column(extra_label, min_width=18)
-            t.add_column("Scanned", style="dim", min_width=19)
-            t.add_column("Tracks", style="dim", width=7)
-            for r in rows:
-                t.add_row(str(r["id"]), r["title"] or "—", r["uploader"] or "—",
-                          r["started_at"][:19], str(r["track_count"]))
-        console.print(t)
-
-    elif cmd == "enriched":
-        from .db import list_enriched_tracks
-        rows = list_enriched_tracks(args.limit, playlist_name=getattr(args, "playlist", None))
-        if not rows:
-            console.print("[dim]No enriched tracks yet.[/dim]")
-            return
-        t = Table(show_header=True, header_style="bold magenta", box=None, padding=(0, 2))
-        t.add_column("Artist",      min_width=20)
-        t.add_column("Title",       min_width=24)
-        t.add_column("BPM",         style="dim", width=6)
-        t.add_column("Key",         style="dim", width=5)
-        t.add_column("Genre",       min_width=14)
-        t.add_column("Released",    style="dim", width=11)
-        t.add_column("BP ID",       style="dim", width=10)
-        t.add_column("Link",        style="blue", no_wrap=True)
-        t.add_column("Apple Music", style="dim", no_wrap=True)
-        t.add_column("MIK Key",     style="dim", width=8)
-        t.add_column("Nrg",         style="dim", width=4)
-        t.add_column("Stems",       style="dim", width=16)
-        for r in rows:
-            bpm      = f"{r['bpm']:.0f}" if r["bpm"] else "—"
-            released = (r["release_date"] or "—")[:10]
-            bp_id    = str(r["beatport_id"]) if r["beatport_id"] else "—"
-            bp_link  = r["beatport_link"] or "—"
-            am_link  = r["apple_music_url"] or "—"
-            mik_key  = r["mik_key"] or "—"
-            mik_nrg  = str(r["mik_nrg"]) if r["mik_nrg"] is not None else "—"
-            stems_parts = [
-                f"V:{r['vocals'][0].upper()}" if r["vocals"] else "",
-                f"D:{r['drums'][0].upper()}"  if r["drums"]  else "",
-                f"M:{r['melody'][0].upper()}" if r["melody"] else "",
-            ]
-            stems = " ".join(p for p in stems_parts if p) or "—"
-            t.add_row(r["artist"] or "—", r["title"] or "—",
-                      bpm, r["key"] or "—", r["genre"] or "—",
-                      released, bp_id, bp_link, am_link, mik_key, mik_nrg, stems)
-        console.print(t)
-        console.print(f"\n[dim]{len(rows)} enriched tracks[/dim]")
-
-    elif cmd == "enrich-runs":
-        from .db import list_enrich_runs
-        runs = list_enrich_runs(args.limit)
-        if not runs:
-            console.print("[dim]No enrich runs yet.[/dim]")
-            return
-        t = Table(show_header=True, header_style="bold magenta", box=None, padding=(0, 2))
-        t.add_column("ID",         style="dim", width=5)
-        t.add_column("Started",    style="dim", width=20)
-        t.add_column("Finished",   style="dim", width=20)
-        t.add_column("Seen",       style="dim", width=6)
-        t.add_column("Enriched",   style="green", width=9)
-        t.add_column("Duplicate",  style="dim", width=10)
-        t.add_column("No results", style="yellow", width=11)
-        t.add_column("Fuzzy miss", style="yellow", width=11)
-        t.add_column("Status",     style="dim", width=8)
-        for r in runs:
-            t.add_row(
-                str(r["id"]),
-                r["started_at"][:19],
-                (r["finished_at"] or "—")[:19],
-                str(r["seen"]),
-                str(r["found"]),
-                str(r["duplicate"] or 0),
-                str(r["not_found"]),
-                str(r["fuzzy_miss"]),
-                r["status"] or "—",
-            )
-        console.print(t)
-        console.print(f"\n[dim]{len(runs)} runs[/dim]")
-
-    elif cmd == "enrich-tracks":
-        session_type = getattr(args, "type", None)
-
-        def _pos_str(pos) -> str:
-            if pos is None:
-                return "—"
-            if session_type in ("instagram", "reddit", "topdjmixes"):
-                return f"#{pos}"
-            if session_type in ("text", "1001tracklists"):
-                return _fmt_time(pos) if pos >= 60 else f"#{pos}"
-            return _fmt_time(pos)
-
-        rows = tracks_for_session_enriched(args.session_id)
-        if not rows:
-            console.print(f"[dim]No tracks for {args.type} session #{args.session_id}.[/dim]")
-            return
-        t = Table(show_header=True, header_style="bold magenta", box=None, padding=(0, 2))
-        t.add_column("#",        style="dim", width=8)
-        t.add_column("Artist",   min_width=20)
-        t.add_column("Title",    min_width=24)
-        t.add_column("BPM",      style="dim", width=6)
-        t.add_column("Key",      style="dim", width=5)
-        t.add_column("Genre",    min_width=14)
-        t.add_column("Released", style="dim", width=11)
-        t.add_column("BP ID",    style="dim", width=10)
-        t.add_column("Link",     style="blue", no_wrap=True)
-        t.add_column("MIK Key",  style="dim", width=8)
-        t.add_column("Nrg",      style="dim", width=4)
-        for r in rows:
-            outcome  = r["enrich_outcome"] or ""
-            fuzzy    = "[yellow]~[/yellow]" if outcome == "fuzzy_miss" else ""
-            artist   = (r["artist"] or "—") + (f" {fuzzy}" if fuzzy else "")
-            bpm      = f"{r['bpm']:.0f}" if r["bpm"] else "—"
-            released = (r["release_date"] or "—")[:10]
-            bp_id    = str(r["beatport_id"]) if r["beatport_id"] else "—"
-            bp_link  = r["beatport_link"] or "—"
-            mik_key  = r["mik_key"] or "—"
-            mik_nrg  = str(r["mik_nrg"]) if r["mik_nrg"] is not None else "—"
-            t.add_row(_pos_str(r["position"]), artist, r["title"] or "—",
-                      bpm, r["key"] or "—", r["genre"] or "—",
-                      released, bp_id, bp_link, mik_key, mik_nrg)
-        console.print(t)
-        console.print(f"\n[dim]{len(rows)} tracks[/dim]")
 
     elif cmd == "fix-session":
         _cmd_fix_session(args)

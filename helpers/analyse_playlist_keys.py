@@ -3,7 +3,7 @@ then write the analyzed mik_key back into the rekordbox playlist.
 
 Two-step orchestration:
     1. Extract beatport_ids from the named rekordbox playlist
-    2. Run `dj detect studio-analyse --ids ...` on tracks not already in
+    2. Run `dj enrich analyse --ids ...` on tracks not already in
        enriched_tracks_analysis (DJ Studio must be quit for this step)
     3. Run helpers/update_rekordbox_keys.py to rewrite KeyID per track
        using the freshly-analyzed mik_key (rekordbox must be quit for this step)
@@ -97,14 +97,14 @@ def main() -> int:
             console.print("\n[dim]Would run:[/dim]")
             preview = ",".join(str(b) for b in pending[:10])
             tail = "…" if len(pending) > 10 else ""
-            console.print(f"  uv run dj_cli.py detect studio-analyse --ids {preview}{tail}")
+            console.print(f"  uv run dj_cli.py enrich analyse --ids {preview}{tail}")
         console.print(f"  uv run python helpers/update_rekordbox_keys.py --playlist '{args.playlist}'")
         return 0
 
     # ── Step 3: run studio-analyse on pending tracks ────────────────────────
     if pending and not args.skip_analyse:
         ids_arg = ",".join(str(b) for b in pending)
-        cmd = ["uv", "run", "dj_cli.py", "detect", "studio-analyse", "--ids", ids_arg]
+        cmd = ["uv", "run", "dj_cli.py", "enrich", "analyse", "--ids", ids_arg]
         if args.verbose:
             cmd.append("--verbose")
         console.print(f"\n[bold cyan]→ running studio-analyse on {len(pending)} tracks…[/bold cyan]")

@@ -6,7 +6,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-import detect.enrich as enrich_mod
+import enrich.engine as enrich_mod
 
 
 @pytest.fixture
@@ -19,7 +19,7 @@ def mock_caffeinate():
         yield
         entered.append(False)
 
-    with patch("detect.enrich.caffeinate", _fake):
+    with patch("enrich.engine.caffeinate", _fake):
         yield entered
 
 
@@ -34,12 +34,12 @@ def _make_run_enrich_stubs(tracks):
     dummy_bp.search_tracks.return_value = []
 
     return [
-        patch("detect.enrich.detect_db.get_unenriched_tracks", return_value=tracks),
-        patch("detect.enrich.detect_db.start_enrich_run", return_value=1),
-        patch("detect.enrich.detect_db.finish_enrich_run"),
-        patch("detect.enrich._get_token", return_value="Bearer fake"),
-        patch("detect.enrich.bp_api.make_client", return_value=MagicMock()),
-        patch("detect.enrich.bp_api.Beatport", return_value=dummy_bp),
+        patch("enrich.engine.detect_db.get_unenriched_tracks", return_value=tracks),
+        patch("enrich.engine.detect_db.start_enrich_run", return_value=1),
+        patch("enrich.engine.detect_db.finish_enrich_run"),
+        patch("enrich.engine._get_token", return_value="Bearer fake"),
+        patch("enrich.engine.bp_api.make_client", return_value=MagicMock()),
+        patch("enrich.engine.bp_api.Beatport", return_value=dummy_bp),
     ]
 
 

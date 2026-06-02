@@ -12,7 +12,7 @@ without guessing. Run this against:
 
 Compare the outputs side-by-side to see what `bp_state`, `error_props`, and
 `phase` look like in each case. Then update `_is_bp_token_stale` in
-detect/studio_analyse.py with real markers.
+enrich/analyse.py with real markers.
 
 DJ Studio MUST be quit (port 61894 + .beatport/ cache locks).
 
@@ -30,7 +30,7 @@ from pathlib import Path
 
 from rich.console import Console
 
-from detect.studio_sdk import (
+from enrich.studio_sdk import (
     SdkHelper,
     _get_dj_studio_access_token,
     is_dj_studio_running,

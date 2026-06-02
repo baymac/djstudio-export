@@ -3,8 +3,8 @@
 The enriched_tracks schema has no UNIQUE constraint on beatport_id (by design —
 each row records a separate detection→Beatport resolution). Over time this
 accumulates duplicate rows for tracks that were detected multiple times or
-that came in via both `dj detect enrich` (Shazam path) and `dj detect
-sync-beatport` (playlist sync). For 81 of these in the user's DB.
+that came in via both `dj enrich --detect` (Shazam path) and `dj sync
+beatport` (playlist sync). For 81 of these in the user's DB.
 
 This helper:
   1. Finds every beatport_id with > 1 row in enriched_tracks
