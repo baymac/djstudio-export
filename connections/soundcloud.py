@@ -4,10 +4,10 @@ Two auth modes coexist:
 
 - **client_credentials** (default) — server-to-server, no user context. Works
   for public sets / tracks. Cached at `~/Music/dj/state/soundcloud_token.json`.
-- **authorization_code** (after `dj detect login-soundcloud`) — user-bound,
-  required for personalized `/discover/sets/...` URLs and any user-private
-  content. Cached at `~/Music/dj/state/soundcloud_user_token.json` with a
-  long-lived refresh token; auto-refreshed before expiry and on 401.
+- **authorization_code** (via the `login_user()` helper — no longer a CLI
+  command) — user-bound, required for personalized `/discover/sets/...` URLs and
+  any user-private content. Cached at `~/Music/dj/state/soundcloud_user_token.json`
+  with a long-lived refresh token; auto-refreshed before expiry and on 401.
 
 `_get_token()` prefers the user token when available and falls back to
 client_credentials, so detect/soundcloud.py doesn't need to know which is
@@ -148,7 +148,7 @@ def _fetch_new_token() -> str:
 
 
 def has_user_auth() -> bool:
-    """True if a user-bound OAuth token has been issued via login-soundcloud."""
+    """True if a user-bound OAuth token has been issued via login_user()."""
     if not _USER_TOKEN_FILE.exists():
         return False
     try:

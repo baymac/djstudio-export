@@ -68,7 +68,7 @@ def fetch_full_rows(beatport_ids: Sequence[int]) -> list[dict]:
         rows = con.execute(
             f"""SELECT e.*, a.mik_key AS mik_key_analysis, a.mik_nrg, a.vocals, a.drums,
                        a.melody, a.tempo_precise, a.duration_sec, a.cue_points_count,
-                       a.analysis_json, a.rk_analysis_json,
+                       a.analysis_json,
                        a.dj_studio_at, a.rekordbox_export_at, a.rekordbox_analysis_at
                 FROM enriched_tracks e
                 LEFT JOIN enriched_tracks_analysis a ON a.beatport_id = e.beatport_id

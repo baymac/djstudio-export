@@ -278,7 +278,7 @@ def search_soundcloud_gems(genre: str, count: int, max_age_days: int,
     if not sc_api.has_credentials():
         raise RuntimeError(
             "SOUNDCLOUD_CLIENT_ID / SOUNDCLOUD_CLIENT_SECRET not set in .env.\n"
-            "Add them or run `dj detect login-soundcloud` first."
+            "Add them to use SoundCloud gem discovery (auth is then automatic)."
         )
 
     token = sc_api._get_token()

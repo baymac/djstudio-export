@@ -1,6 +1,6 @@
 # dj
 
-Unified DJ toolkit. Builds a fully-analysed track library: pull tracks in from Apple Music, Beatport, and detected audio sources, progressively enrich each track with Beatport metadata, DJ Studio analysis (key/energy/cues/stems), and rekordbox phrase tags. Then push any SQL-curated subset to a Beatport playlist, a rekordbox playlist, or a DJ Studio mix.
+Unified DJ toolkit. Builds a fully-analysed track library: pull tracks in from Apple Music, Beatport, and detected audio sources, progressively enrich each track with Beatport metadata and DJ Studio analysis (key/energy/cues/stems). Then build energy-sequenced sets, and push any stored set or SQL-curated subset to a Beatport chart/playlist or a rekordbox playlist.
 
 All tool-generated files live under `~/Music/dj/`:
 
@@ -31,7 +31,7 @@ Node.js (v18+) and npm are required for `dj vj cats start` and `dj course start`
 
 Copy `.env.example` to `.env` and fill in credentials before using `detect` or `sync`.
 
-Rekordbox must be **closed** before any rekordbox write (`detect export-to-rekordbox`, `detect import-rekordbox-analysis`, `playlist rekordbox`).
+Rekordbox must be **closed** before any rekordbox write (`dj export set <id> --to rekordbox`, `dj export rekordbox --query ...`).
 
 DJ Studio must be **closed** before `detect studio-analyse`.
 
@@ -66,16 +66,9 @@ DJ Studio must be **closed** before `detect studio-analyse`.
    enriched_tracks_analysis  ←  mik_key, mik_nrg, per-stem RMS,
                                  analysis_json (full energy segments + 1Hz stem curves
                                  + per-segment stem RMS)  +  dj_studio_at
-                              │
-                              │  Stage 6a: dj detect export-to-rekordbox
-                              │            [open rekordbox → Analyze Tracks → close]
-                              │  Stage 6b: dj detect import-rekordbox-analysis
-                              ↓
-   enriched_tracks_analysis  +  rk_analysis_json (PSSI phrases + cues)
-                              +  rekordbox_export_at, rekordbox_analysis_at
 ```
 
-Each enrichment stage is idempotent. `enriched_tracks_analysis` carries per-stage timestamps (`dj_studio_at`, `rekordbox_export_at`, `rekordbox_analysis_at`); re-runs only pick up new work. You can stop at any stage — every stage is independently useful. A row exists in `enriched_tracks_analysis` only after `studio-analyse` has populated it; `enriched_tracks` carries everything Beatport-derived without any sibling rows in the analysis table.
+Each enrichment stage is idempotent. `enriched_tracks_analysis` carries `dj_studio_at`; re-runs only pick up new work. You can stop at any stage — every stage is independently useful. A row exists in `enriched_tracks_analysis` only after `studio-analyse` has populated it; `enriched_tracks` carries everything Beatport-derived without any sibling rows in the analysis table. (A former rekordbox phrase round-trip — Stage 6 — was removed; the `rk_analysis_json` / `rekordbox_*_at` columns remain for old data but are no longer written.)
 
 ---
 
@@ -104,30 +97,21 @@ dj
 │   ├── gems                                            Discover low-play tracks by genre + recency
 │   │                                                   [--source S] [--genre G] [--count N] [--date D] [--no-save]
 │   │
-│   ├── history / sessions / *-history                 Inspect detection state
 │   ├── *-delete-session <id>                          Remove a scan session
 │   ├── fix-session <id>                               Correct detected tracks using a confirmed tracklist (stdin)
 │   │                                                  [--threshold F] [--apply]
-│   ├── login-instagram / login-mixcloud               Save credentials
 │   │
 │   ├── enrich                                         Stage 3: detected → Beatport metadata
 │   │                                                  [--dry-run] [--limit N] [--verbose] [--threshold F] [--retry-misses]
 │   ├── sync-beatport                                  Stage 4: Beatport library → enriched_tracks
 │   │                                                  [--dry-run] [--limit N] [--verbose]
-│   ├── studio-analyse                                 Stage 5: drive DJ Studio's SDK → enriched_tracks_analysis
-│   │                                                  [--ids ID,...] [--limit N] [--verbose] [--force] [--retry-failed]
-│   ├── export-to-rekordbox                            Stage 6a: push to rekordbox playlist
-│   │                                                  [--playlist NAME] [--limit N] [--dry-run] [--force]
-│   ├── import-rekordbox-analysis                      Stage 6b: ingest rekordbox PSSI + cues
-│   │                                                  [--limit N] [--force] [--verbose]
-│   │
-│   ├── enriched [-n N]                                List enriched tracks
-│   ├── enrich-runs [-n N]                             Past enrich run summaries
-│   └── enrich-tracks <type> <id> [--misses]           Per-session enrichment status
+│   └── studio-analyse                                 Stage 5: drive DJ Studio's SDK → enriched_tracks_analysis
+│                                                      [--ids ID,...] [--limit N] [--verbose] [--force] [--retry-failed]
 │
-├── playlist                                           Push a SQL-curated subset to a destination
-│   ├── beatport --query SQL --name NAME               Beatport playlist
-│   └── rekordbox --query SQL --name NAME              Rekordbox playlist
+├── export                                             Push a stored set or SQL-curated subset to a destination
+│   ├── set <id> --to bp_chart|bp_playlist|rekordbox  Stored set (from the set builder) → destination
+│   ├── beatport  --query SQL --name NAME              Ad-hoc SQL → Beatport playlist
+│   └── rekordbox --query SQL --name NAME              Ad-hoc SQL → rekordbox playlist
 │
 └── course                                             Offline course viewer (apps/course)
     ├── start                                          Spawn vite via portless, open https://course.localhost
@@ -199,46 +183,26 @@ uv run dj_cli.py detect reddit https://www.reddit.com/r/HypeTracks/comments/XXXX
 uv run dj_cli.py detect topdjmixes https://www.topdjmixes.com/some-mix-page/
 ```
 
-**Credentials:**
-- Instagram: `IG_USERNAME` / `IG_PASSWORD` in `.env`, or `dj detect login-instagram`.
-- Mixcloud: `MC_USERNAME` / `MC_PASSWORD`, or `dj detect login-mixcloud`.
+**Credentials** (auth is automatic — no separate login command):
+- Instagram: set `IG_USERNAME` / `IG_PASSWORD` in `.env`, or just run `dj detect instagram <url>` and enter them once when prompted; a successful login is saved and reused.
+- Mixcloud: set `MC_USERNAME` / `MC_PASSWORD` (optional — public mixes work without). Freshly provided creds are saved and reused.
 - SoundCloud: optional OAuth via `SOUNDCLOUD_CLIENT_ID` / `SOUNDCLOUD_CLIENT_SECRET` (register an app at https://soundcloud.com/you/apps). When configured, set/track metadata comes from SoundCloud's official API — clean artist/title fields, no rate-limit pain. When absent, falls back to yt-dlp scrape + URL-slug derivation (works but lower fidelity). Share-link tracking params (`?si=…`, `&utm_*=…`) are stripped automatically. The handler auto-detects three URL shapes:
     - **Set** (`/<user>/sets/<slug>`) → enumerate child tracks via metadata, no audio download.
     - **Single track ≤15 min** → save the track's metadata as one row (no Shazam scan).
     - **Single track >15 min** (radio episodes, DJ mixes) → Shazam-by-chunks audio scan.
-    - **Personalized `/discover/` URLs** (e.g. `personalized-tracks::<user>:<id>`) → require user-bound OAuth (run `dj detect login-soundcloud` once; opens browser, OAuth dance, saves a refresh token). After login the handler auto-uses the user token for all calls; without it `/discover/` URLs return a clear "login required" message. Make sure your SoundCloud app has `http://localhost:8080/callback` (or your custom `SOUNDCLOUD_REDIRECT_URI`) in its Redirect URI list.
+    - SoundCloud auth is automatic from the client credentials above (token fetched + refreshed on demand). Personalized `/discover/` URLs need a user-bound OAuth token; that one-time browser OAuth helper (`connections.soundcloud.login_user`) is no longer wired to a CLI command — set `SOUNDCLOUD_REDIRECT_URI` and call it if you need personalized feeds.
 - YouTube: no credentials needed. yt-dlp extracts cookies from the first available browser (Brave → Chrome → Safari → Firefox) and caches them for one week. If YouTube returns a bot-detection challenge, the cache is discarded and cookies are re-extracted before retrying. If no browser is available the fallback passes `--cookies-from-browser chrome` live.
 - Reddit: none. Public JSON API. Works on any subreddit text post whose body contains `Artist - Title` lines (markdown links and `[brackets]` are stripped).
 - topdjmixes: none. Paste-into-vi flow (same parser shape as Reddit). Works on any tracklist with `01. Artist – Title` lines — leading position numbers and `[label]` brackets are stripped.
 
-### History and sessions
+### Sessions
+
+The read-only browse commands (`history`, `sessions`, `*-history`, `enriched`,
+`enrich-runs`, `enrich-tracks`) were removed — query the SQLite DB at
+`~/Music/dj/dj.db` directly for inspection. Deleting a scan session is still a
+command:
 
 ```bash
-uv run dj_cli.py detect history             # all detected tracks, newest first
-uv run dj_cli.py detect history -n 100
-
-uv run dj_cli.py detect sessions youtube       # session list with track counts
-uv run dj_cli.py detect sessions mixcloud
-uv run dj_cli.py detect sessions soundcloud
-uv run dj_cli.py detect sessions radio
-uv run dj_cli.py detect sessions instagram
-uv run dj_cli.py detect sessions podbean
-uv run dj_cli.py detect sessions reddit
-uv run dj_cli.py detect sessions topdjmixes
-
-uv run dj_cli.py detect sessions podbean 24    # detected_tracks for one session, in a table
-uv run dj_cli.py detect sessions youtube 7     # (Pos, Artist, Title, Apple Music URL, enrich_outcome)
-
-uv run dj_cli.py detect instagram-history           # grouped by post
-uv run dj_cli.py detect instagram-history --tracks  # flat track list only
-uv run dj_cli.py detect radio-history
-uv run dj_cli.py detect mixcloud-history
-uv run dj_cli.py detect youtube-history
-uv run dj_cli.py detect soundcloud-history
-uv run dj_cli.py detect podbean-history
-uv run dj_cli.py detect reddit-history
-uv run dj_cli.py detect topdjmixes-history
-
 uv run dj_cli.py detect mixcloud-delete-session <id>
 uv run dj_cli.py detect youtube-delete-session <id>
 uv run dj_cli.py detect soundcloud-delete-session <id>
@@ -321,7 +285,7 @@ Takes everything in `detected_tracks` that doesn't have a Beatport match yet, fu
 
 Each match writes one row to `enriched_tracks` carrying every Beatport-derived field on the same row: the basic search-result fields (`bpm`, `key`, `genre`, `release_date`, `beatport_id`, `beatport_link`, `artist`, `title`, `apple_music_url`) plus the catalog-detail extras (`mix_name`, `label`, `catalog_number`, `isrc`, `sub_genre`, `length_ms`) fetched from `/v4/catalog/tracks/{id}/`.
 
-Beatport-sourced data is fetched **only** here (and inline-extracted by Stage 4 from the playlist response). Stages 5 and 6 do not call Beatport.
+Beatport-sourced data is fetched **only** here (and inline-extracted by Stage 4 from the playlist response). Stage 5 does not call Beatport.
 
 ```bash
 uv run dj_cli.py detect enrich                       # enrich all pending tracks
@@ -422,140 +386,55 @@ analysis_json            -- compact JSON blob: full energy segments,
 dj_studio_at             -- set on first INSERT
 ```
 
-**Not stored** (intentionally): semantic phrase labels (intro/chorus/breakdown/etc.). DJ Studio doesn't produce those — its renderer never calls the dormant ML phrase model and real `track-structures-table.phraseData` arrays are empty. For real labelled phrases use Stage 6.
+**Not stored** (intentionally): semantic phrase labels (intro/chorus/breakdown/etc.). DJ Studio doesn't produce those — its renderer never calls the dormant ML phrase model and real `track-structures-table.phraseData` arrays are empty.
+
+> **Removed — rekordbox phrase round-trip (former Stage 6):** an earlier flow pushed tracks to rekordbox (`detect export-to-rekordbox`), had you run rekordbox's *Analyze Tracks*, then read PSSI phrase tags + cues back into `rk_analysis_json` (`detect import-rekordbox-analysis`). Both commands are gone. The `rk_analysis_json` / `rekordbox_export_at` / `rekordbox_analysis_at` columns remain for pre-existing data but are no longer written, and the library currently carries no semantic phrase labels. To send a curated set to rekordbox, use `dj export set <id> --to rekordbox`.
+
+Inspecting enriched data: the read-only browse commands (`detect enriched`, `enrich-runs`, `enrich-tracks`, `history`, `sessions`) were removed — query `~/Music/dj/dj.db` directly.
 
 ---
 
-# Stage 6 — rekordbox phrase analysis
+## Building a set — `dj-set-builder` skill + `helpers/build_set.py`
 
-Rekordbox's automatic Analyze produces semantic phrase labels (Intro / Verse / Chorus / Outro / Up / Down / Bridge) via its proprietary PSSI tag, plus auto-placed memory cues and hot cues. Two commands plus one manual step:
+A set is curated as an **intensity curve over time**, not a flat genre filter. Pick an *archetype* (a named energy shape), and the engine walks the analysed library choosing each next track so the set follows that shape while staying mixable (harmonic + tempo + texture) and varied (familiar names interleaved with gems). The result is stored in `dj_sets` and addressed by a returned **set id**. Building does **not** export — that's the separate `dj export set <id>` step.
 
-1. **`export-to-rekordbox`** pushes tracks into a rekordbox playlist as Beatport streaming entries.
-2. Manually open rekordbox → playlist → right-click → **Analyze Tracks**.
-3. **`import-rekordbox-analysis`** reads the resulting ANLZ files (PSSI + cues) into `enriched_tracks_analysis.rk_analysis_json`.
-
-### export-to-rekordbox — push tracks into a rekordbox playlist
-
-Adds tracks to your rekordbox library as Beatport streaming entries (`FileType=20`, the same kind rekordbox creates when you drag a Beatport track from its in-app browser) and to a named playlist. **Doesn't push cue points** — those would shadow whatever rekordbox computes. Tracks land bare; rekordbox fills in beat grid + cue points + phrase tags itself.
-
-**Prerequisite:** rekordbox must be quit (locks `master.db`). Pre-flight check aborts if it's running. `master.db` is backed up to `<rekordbox-share>/claude-backups/` before any write.
-
-**Idempotent:** skip rule is `rekordbox_export_at IS NULL`. Re-runs pick up only new tracks. `--force` overrides.
+The `dj-set-builder` skill is the interactive front end: it asks for a name, mood/occasion, duration, track count, genres, and release-date mix, then runs `build_set.py` with the resolved flags. You can also drive the script directly.
 
 ```bash
-uv run dj_cli.py detect export-to-rekordbox --limit 5 --dry-run
-uv run dj_cli.py detect export-to-rekordbox --playlist "DJ Tools - Enrich"
+uv run helpers/build_set.py --list-archetypes              # catalogue + each one's default genres + curve
+uv run helpers/build_set.py --list-genres --archetype party   # library genres + live track counts (* = default)
+
+# Preview (no DB write):
+uv run helpers/build_set.py --archetype club_night --duration 120
+
+# Build + store (prints set_id=<n>):
+uv run helpers/build_set.py --archetype party --name "Maya's Bday" --mood "friends birthday" \
+  --duration 90 --count 24 --genres "House,Tech House,Bass House" \
+  --date-blend '[{"label":"this year","from":"2026-01-01","ratio":0.9},{"label":"older","to":"2025-12-31","ratio":0.1}]' \
+  --save
 ```
 
-### Manual: Analyze Tracks in rekordbox
+**Archetypes** (extend `ARCHETYPES` in `build_set.py` to add more): `warmup`, `peak_time`, `late_night`, `closing`, `club_night`, `sunset`, `party`, `dark`, `festival`, `dinner`, `morning_coffee`. Each carries default genres, a BPM/energy window, and a multi-phase **non-monotonic** curve — e.g. `club_night` rises, bumps, dips deliberately, S-climbs to a plateau, dips again, then spikes to a high finish.
 
-Open rekordbox, find the playlist, select all tracks, right-click → **Analyze Tracks**. This writes ANLZ files containing PSSI phrase tags + auto-placed cues. Quit rekordbox once analysis finishes.
+**Composite intensity** — the curve targets a pool-relative blend, not raw loudness:
 
-### import-rekordbox-analysis — read ANLZ data into rk_analysis_json
-
-Reads each track's ANLZ file and saves a JSON blob into `enriched_tracks_analysis.rk_analysis_json`:
-
-| Source | Field |
-|---|---|
-| PSSI tag | `mood_id`, `mood_name` (Low / Mid / High EDM); per-phrase `{kind_id, label, start_beat, end_beat, length_beats, start_sec, end_sec}` with semantic labels (Intro / Verse / Bridge / Chorus / Outro for Mood Low/Mid; Intro / Up / Down / Chorus / Outro for Mood High) |
-| PCO2 / PCOB tags | `memory_cues[]` and `hot_cues[]`, each with `{time_sec, loop_time_sec, name, color_id, type_id}` — rekordbox auto-places its own based on Mood; usually more numerous and more useful than MIK's 8 |
-| `DjmdContent.BPM` | `rekordbox_bpm` (rekordbox's own beatgrid BPM, may differ from `tempo_precise` / `ai-beatgrid`) |
-| ANLZ tag list | `tags_seen` — diagnostic list of all tags found |
-
-**Idempotent:** skip rule is `rekordbox_export_at IS NOT NULL AND rekordbox_analysis_at IS NULL`. Tracks not yet pushed are skipped (run `export-to-rekordbox` first). Tracks pushed but not yet analysed in rekordbox produce a partial blob and are NOT marked complete — re-run after analysing.
-
-**Prerequisite:** rekordbox must be quit.
-
-```bash
-uv run dj_cli.py detect import-rekordbox-analysis --verbose
+```
+intensity = 10 · ( 0.60·norm(mik_nrg) + 0.25·pct(bpm) + 0.15·drive )    drive = mean(drums_pct, bass_pct)
 ```
 
-Sample `rk_analysis_json`:
+so a slow loud record and a fast sparse one don't read as equal energy. The greedy scorer also rewards Camelot-adjacent keys + smooth BPM + stem-texture matching the phase (warm-ups pull melodic/vocal, peaks pull drum+bass), and spaces artists/labels (max 2 tracks per artist).
 
-```json
-{
-  "version": 1,
-  "rekordbox_track_id": "12345",
-  "mood_id": 3,
-  "mood_name": "High (EDM)",
-  "phrases": [
-    {"index": 0, "kind_id": 1, "label": "Intro", "start_beat": 1, "end_beat": 32, "length_beats": 31, "start_sec": 0.0, "end_sec": 14.42},
-    {"index": 1, "kind_id": 2, "label": "Up", "start_beat": 32, "end_beat": 64, "length_beats": 32, "start_sec": 14.42, "end_sec": 28.84},
-    {"index": 2, "kind_id": 4, "label": "Chorus", "start_beat": 64, "end_beat": 128, "length_beats": 64, "start_sec": 28.84, "end_sec": 57.68}
-  ],
-  "memory_cues": [{"time_sec": 0.0, "name": "Intro", "color_id": 1}],
-  "hot_cues":    [{"time_sec": 28.84, "name": "Drop", "color_id": 6}],
-  "rekordbox_bpm": 129.18,
-  "tags_seen": ["PCOB", "PCO2", "PQT2", "PQTZ", "PSSI", "PWAV", "PWV5", "PWV6"]
-}
-```
+**Flags:**
+- `--archetype` (required), `--duration` minutes (required). Track count is clamped to `[duration/5, duration/2]`; `--count` sets it, default `≈duration/3.5`.
+- `--genres "A,B,C"` overrides the archetype defaults (your choice is final); omit to use defaults.
+- `--date-blend '<json>'` — proportional release-date mix: a list of `{label, from, to, ratio}` buckets, filled to ~each ratio (a single window is one 100% bucket). Omit for the default 75% ≤1yr / 12.5% 1–2yr / 12.5% older mix. The skill converts free text ("may 2026 50%, jan 30%, feb 20%") into this JSON.
+- `--seed-id <beatport_id>` forces a track first; `--json` emits the built set; `--save` persists and prints `set_id=`.
 
-### End-to-end stages 5 + 6
-
-```bash
-# Stage 5 — quit DJ Studio first
-uv run dj_cli.py detect studio-analyse --verbose
-
-# Stage 6a — quit rekordbox first
-uv run dj_cli.py detect export-to-rekordbox
-
-# Stage 6 manual — open rekordbox → playlist → right-click → Analyze Tracks → quit
-
-# Stage 6b
-uv run dj_cli.py detect import-rekordbox-analysis --verbose
-```
+Sets persist in `dj_sets` / `dj_set_tracks`: identity is `(name, archetype)`, so rebuilding the same name+archetype **replaces** it, and the full build provenance (mood, duration, count, genres, date blend, curve) is stored as JSON in `dj_sets.params_json`. Query a stored set by id, or edit it (add/remove/move/reorder/rename) via the helpers in `detect/db.py`.
 
 ---
 
-## Viewing enriched data
-
-```bash
-uv run dj_cli.py detect enriched              # all enriched tracks, newest first
-uv run dj_cli.py detect enriched -n 100
-uv run dj_cli.py detect enriched -p "Tech House"   # filter by Beatport playlist
-
-uv run dj_cli.py detect enrich-runs           # past Stage 3 run summaries
-uv run dj_cli.py detect enrich-runs -n 5
-
-# Per-session enrichment status
-uv run dj_cli.py detect enrich-tracks youtube 3              # session #3
-uv run dj_cli.py detect enrich-tracks mixcloud 7
-uv run dj_cli.py detect enrich-tracks youtube 3 --misses     # only not_found / fuzzy_miss
-```
-
-Use `detect sessions <type>` to find session IDs. `detect sessions <type> <id>` shows the raw `detected_tracks` for that scan; `detect enrich-tracks <type> <id>` shows the same set but with their Beatport-enrichment status joined in.
-
----
-
-## playlist — SQL → Beatport / rekordbox
-
-Take any SQL query that returns `beatport_id` and push the matching tracks to one of two destinations. The push code re-fetches each row via `enriched_tracks LEFT JOIN enriched_tracks_analysis USING(beatport_id)` so artist/title/genre/key/bpm/length_ms are always available, regardless of how the user wrote their SQL.
-
-```bash
-# Beatport — creates the playlist if it doesn't exist; dedups against existing tracks
-uv run dj_cli.py playlist beatport \
-  --query "SELECT beatport_id FROM enriched_tracks WHERE genre='Tech House' AND bpm BETWEEN 124 AND 128 ORDER BY bpm" \
-  --name "Peak Tech House"
-
-# Rekordbox — creates the playlist; pushes bare Beatport streaming entries (FileType=20).
-# Doesn't push cues. Quit rekordbox first.
-# Filter on analysis-table columns by JOINing yourself:
-uv run dj_cli.py playlist rekordbox \
-  --query "SELECT e.beatport_id FROM enriched_tracks e JOIN enriched_tracks_analysis a USING(beatport_id) WHERE a.rk_analysis_json LIKE '%\"mood_name\":\"High%' LIMIT 30" \
-  --name "High-mood set"
-
-# Both accept --dry-run.
-```
-
-**Validation:** the query must start with `SELECT`. After fetch, if no `beatport_id` column is in the result set, the call errors. beatport_ids missing from `enriched_tracks` are reported and skipped.
-
-**Difference from `detect export-to-rekordbox`:** that one is the idempotent Stage 6a that pushes everything in `enriched_tracks_analysis` where `rekordbox_export_at IS NULL` (i.e., already through `studio-analyse` but not yet pushed) and stamps the timestamp on success. `playlist rekordbox` is ad-hoc curation by SQL — no pipeline-stamp side effects, and it works against any track in `enriched_tracks` whether or not it's been through `studio-analyse`.
-
-**Why no DJ Studio destination?** A previous `playlist dj-studio` destination wrote `projects-table/<uuid>` + `projects-meta-table/<uuid>` files, but DJ Studio also tracks per-mix UI state in IndexedDB (`~/Library/Application Support/DJ.Studio/IndexedDB/local-web_*.indexeddb.leveldb/`) that we couldn't write to — meaning UI delete was a no-op for tool-created mixes. We removed the destination rather than ship a half-working write path. DJ Studio is now read-only for this tool; assemble mixes in DJ Studio's UI.
-
----
-
-## export — stored set → Beatport chart / playlist / rekordbox
+## export — stored set or SQL query → Beatport / rekordbox
 
 The set builder (the `dj-set-builder` skill, or `helpers/build_set.py`) curates and sequences a set, stores it in `dj_sets`, and hands back a **set id**. It does not export. `dj export set <id>` is the separate, decoupled step that pushes a stored set's tracks — **in set order** — to a destination.
 
@@ -571,7 +450,29 @@ uv run dj_cli.py export set 42 --to rekordbox --dry-run             # rekordbox 
 - `rekordbox` re-fetches full rows (artist/title/genre/key/bpm/duration) before pushing; quit rekordbox first, then Analyze Tracks in rekordbox to generate beatgrid + cues.
 - All destinations accept `--dry-run`.
 
-The push code itself lives in `export/to_beatport.py` + `export/to_rekordbox.py` and is shared with `dj playlist …` and `detect export-to-rekordbox` (Stage 6a) — one home for "write tracks to a destination".
+### Ad-hoc SQL → destination
+
+For a one-off push without building a stored set, give a SQL query that returns
+`beatport_id` (the former `dj playlist` command):
+
+```bash
+uv run dj_cli.py export beatport \
+  --query "SELECT beatport_id FROM enriched_tracks WHERE genre='Tech House' AND bpm BETWEEN 124 AND 128 ORDER BY bpm" \
+  --name "Peak Tech House"
+
+# Filter on analysis-table columns by JOINing yourself; quit rekordbox first:
+uv run dj_cli.py export rekordbox \
+  --query "SELECT e.beatport_id FROM enriched_tracks e JOIN enriched_tracks_analysis a USING(beatport_id) WHERE a.mik_nrg>=7 LIMIT 30" \
+  --name "High-energy set"
+```
+
+The query must start with `SELECT`; if no `beatport_id` is in the result set the
+call errors. After fetch, each row is re-fetched via `enriched_tracks LEFT JOIN
+enriched_tracks_analysis USING(beatport_id)` so push code always has
+artist/title/genre/key/bpm/length_ms. Both verbs accept `--dry-run`.
+
+The push code lives in `export/to_beatport.py` + `export/to_rekordbox.py` —
+one home for "write tracks to a destination", shared by all three `dj export` verbs.
 
 ---
 
@@ -594,7 +495,7 @@ SPOTIFY_CLIENT_SECRET    Spotify app client secret
 
 SOUNDCLOUD_CLIENT_ID     SoundCloud app client ID (for detect soundcloud + detect gems)
 SOUNDCLOUD_CLIENT_SECRET SoundCloud app client secret
-SOUNDCLOUD_REDIRECT_URI  OAuth callback URL (for detect login-soundcloud)
+SOUNDCLOUD_REDIRECT_URI  OAuth callback URL (only for the optional user-OAuth helper)
 ```
 
 Beatport auth runs from your default browser's cookie store — no env vars to set. Just sign into beatport.com once. If you need to seed the tokens manually:
@@ -617,7 +518,7 @@ All tables live in `~/Music/dj/dj.db`.
 | `gem_tracks` | `detect gems` | Per-track gems metadata (url, release_date, plays, popularity) linking a `detected_tracks` row to a `gem_scans` row. Indexed on `(source, release_date)` for the cross-run dedup "fade" query. |
 | `rejected_gems` | `detect gems` | Tracks the user rejected during gem review (source, artist, title, url, release_date). Excluded from future scans on that source. Indexed on `(source, release_date)` for the cross-run dedup "fade" query. |
 | `enriched_tracks` | Stage 3 (`detect enrich`), Stage 4 (`detect sync-beatport`) | All Beatport-derived data on one row: id, detected_track_id, beatport_id, beatport_link, bpm, key, genre, release_date, artist, title, apple_music_url, enriched_at, plus the catalog-detail extras (mix_name, label, catalog_number, isrc, sub_genre, length_ms). |
-| `enriched_tracks_analysis` | Stage 5 (`detect studio-analyse`) creates rows; Stage 6a/6b update them | Sparse — only tracks that have been through `studio-analyse`. Keyed on `beatport_id` (PK). Carries the DJ Studio analysis fields (mik_key, mik_nrg, mik_key_secondary, mik_key_confidence, tempo_precise, duration_sec, cue_points_count, vocals/drums/bass/melody {avg,peak}, analysis_json with full energy segments + 1Hz stem curves + per-segment stem RMS), rekordbox round-trip (rk_analysis_json), and per-stage timestamps (dj_studio_at, rekordbox_export_at, rekordbox_analysis_at). JOIN with `enriched_tracks` for the basic+catalog fields. |
+| `enriched_tracks_analysis` | Stage 5 (`detect studio-analyse`) creates rows | Sparse — only tracks that have been through `studio-analyse`. Keyed on `beatport_id` (PK). Carries the DJ Studio analysis fields (mik_key, mik_nrg, mik_key_secondary, mik_key_confidence, tempo_precise, duration_sec, cue_points_count, vocals/drums/bass/melody {avg,peak}, analysis_json with full energy segments + 1Hz stem curves + per-segment stem RMS) + `dj_studio_at`. The `rk_analysis_json` / `rekordbox_export_at` / `rekordbox_analysis_at` columns survive from the removed rekordbox round-trip but are no longer written. JOIN with `enriched_tracks` for the basic+catalog fields. |
 | `enrich_runs` | Stage 3 (`detect enrich`) | Per-run summary: seen / found / not_found / fuzzy_miss / status. |
 | `deleted_sessions` | `detect *-delete-session` | Audit log of deleted sessions. |
 | `synced_tracks` | Stage 1 (`sync`) | Tracks synced to Beatport with outcome (added / duplicate / fuzzy_miss / no_classify). |
@@ -889,7 +790,7 @@ uv run pytest
 ## Package layout
 
 ```
-dj_cli.py                       CLI entrypoint — detect / sync / playlist / course / vj
+dj_cli.py                       CLI entrypoint — detect / sync / export / course / vj
 
 connections/                    Transport layer — no app-specific dependencies
   beatport.py                   Beatport HTTP client + Playwright session token capture
@@ -909,8 +810,6 @@ detect/                         Track detection + enrichment pipeline (Stages 2-
                                 ai-stems Demucs, cf.dj.studio classifier)
   studio_analyse.py             Stage 5: SDK analysis → enriched_tracks_analysis (DB only,
                                 no DJ Studio filesystem writes)
-  export_to_rekordbox.py        Stage 6a: pending → rekordbox playlist (idempotent)
-  import_rekordbox_analysis.py  Stage 6b: ingest PSSI + cues from ANLZ files
   instagram.py / mixcloud.py / youtube.py / soundcloud.py / radio.py /
   podbean.py / reddit.py / topdjmixes.py
                                 Stage 2: per-platform capture (Shazam for audio
@@ -920,15 +819,14 @@ detect/                         Track detection + enrichment pipeline (Stages 2-
 sync/                           Stage 1: Apple Music → Beatport
   db.py / sync.py / classifier.py / cli.py
 
-playlist/                       SQL-curated push to a destination
+playlist/                       SQL → rows helper (consumed by `dj export beatport|rekordbox`)
   query.py                      Run user SQL → list[beatport_id] + full row fetch
-  cli.py                        argparse subcommands (uses export/ pushers)
 
-export/                         Push targets + stored-set export
+export/                         Push targets + stored-set export (one home for all pushes)
   to_beatport.py                push_to_beatport (playlist) + push_to_beatport_chart
-  to_rekordbox.py               push_to_rekordbox (also imported by Stage 6a + playlist)
+  to_rekordbox.py               push_to_rekordbox
   export_set.py                 Resolve a set id → push to bp_chart/bp_playlist/rekordbox
-  cli.py                        `dj export set <id> --to ...`
+  cli.py                        `dj export set <id> --to ...` + `beatport|rekordbox --query --name`
 
 djstudio/                       Read DJ Studio project files + library (used for ad-hoc inspection)
   extractor.py                  audio-library-table + projects-table reader

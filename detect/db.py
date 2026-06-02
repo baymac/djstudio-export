@@ -1109,48 +1109,6 @@ def mark_pipeline_done(beatport_id: int, column: str) -> None:
         )
 
 
-def get_export_to_rekordbox_pending(*, force: bool = False) -> list[sqlite3.Row]:
-    """Tracks already through studio-analyse but not yet pushed to a rekordbox
-    playlist. Skip rule: rekordbox_export_at IS NULL on enriched_tracks_analysis."""
-    where = "" if force else "WHERE a.rekordbox_export_at IS NULL"
-    with _connect() as con:
-        return con.execute(
-            f"""SELECT a.beatport_id, e.artist, e.title, e.bpm,
-                       e.beatport_link, e.key, e.genre, e.length_ms,
-                       e.isrc, e.release_date,
-                       a.duration_sec, a.mik_key
-                  FROM {ANALYSIS_TABLE} a
-                  JOIN enriched_tracks e ON e.beatport_id = a.beatport_id
-                  {where}
-                  ORDER BY a.beatport_id"""
-        ).fetchall()
-
-
-def get_rekordbox_analysis_pending(*, force: bool = False) -> list[sqlite3.Row]:
-    """Tracks pushed to rekordbox but not yet ingested back from ANLZ."""
-    where = (
-        "WHERE a.rekordbox_export_at IS NOT NULL"
-        if force
-        else "WHERE a.rekordbox_export_at IS NOT NULL AND a.rekordbox_analysis_at IS NULL"
-    )
-    with _connect() as con:
-        return con.execute(
-            f"""SELECT a.beatport_id, e.artist, e.title
-                  FROM {ANALYSIS_TABLE} a
-                  JOIN enriched_tracks e ON e.beatport_id = a.beatport_id
-                  {where}
-                  ORDER BY a.beatport_id"""
-        ).fetchall()
-
-
-def update_rk_analysis_json(beatport_id: int, blob: str) -> None:
-    with _connect() as con:
-        con.execute(
-            f"UPDATE {ANALYSIS_TABLE} SET rk_analysis_json = ? WHERE beatport_id = ?",
-            (blob, beatport_id),
-        )
-
-
 def existing_analysis_beatport_ids() -> set[int]:
     """Return the set of beatport_ids that already have a row in
     enriched_tracks_analysis. Used by `dj detect studio-analyse` to skip
