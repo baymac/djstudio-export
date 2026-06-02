@@ -453,3 +453,78 @@ class Beatport:
             f"{API_ROOT}/my/playlists/{playlist_id}/tracks/bulk/",
             json={"item_ids": [item_id]},
         )
+
+    # --- DJ charts (separate object from playlists) -----------------------
+    #
+    # Charts hang off the account's dj_profile and are publishable. The track
+    # API differs from playlists:
+    #   * add  = POST /my/charts/{id}/tracks/  {"track": <track_id>}   (one at a
+    #            time; auto-assigns an incrementing `position`; no /bulk/ route)
+    #   * list = GET  /my/charts/{id}/tracks/  -> full catalog track objects,
+    #            so `id` on each result IS the catalog track_id (no /ids/ route)
+    # Insertion order becomes chart position, so callers must add in set order.
+
+    def list_my_charts(self) -> list[dict]:
+        out: list[dict] = []
+        page = 1
+        while True:
+            data = self._request(
+                "GET", f"{API_ROOT}/my/charts/?page={page}&per_page=50"
+            ).json()
+            out.extend(data["results"])
+            if not data.get("next"):
+                break
+            page += 1
+        return out
+
+    def create_chart(self, name: str, description: Optional[str] = None) -> dict:
+        body: dict = {"name": name}
+        if description:
+            body["description"] = description
+        return self._request(
+            "POST",
+            f"{API_ROOT}/my/charts/",
+            json=body,
+        ).json()
+
+    def update_chart(self, chart_id: int, **fields) -> dict:
+        """PATCH chart metadata (e.g. description=, name=). PUT requires name and
+        replaces the whole object, so PATCH is the safe partial-update verb."""
+        return self._request(
+            "PATCH",
+            f"{API_ROOT}/my/charts/{chart_id}/",
+            json=fields,
+        ).json()
+
+    def list_chart_track_ids(self, chart_id: int) -> set[int]:
+        ids: set[int] = set()
+        page = 1
+        while True:
+            data = self._request(
+                "GET",
+                f"{API_ROOT}/my/charts/{chart_id}/tracks/"
+                f"?page={page}&per_page=100",
+            ).json()
+            for entry in data["results"]:
+                tid = entry.get("id")
+                if tid:
+                    ids.add(int(tid))
+            if not data.get("next"):
+                break
+            page += 1
+        return ids
+
+    def add_chart_track(self, chart_id: int, track_id: int) -> bool:
+        """POST one track onto a chart. Returns True if newly added, False if it
+        was already present (Beatport rejects dupes with a 400)."""
+        r = self.client.request(
+            "POST",
+            f"{API_ROOT}/my/charts/{chart_id}/tracks/",
+            json={"track": int(track_id)},
+        )
+        if r.status_code < 300:
+            return True
+        if r.status_code == 400 and "already been added" in r.text:
+            return False
+        r.raise_for_status()
+        return False
