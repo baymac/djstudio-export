@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.6.1] - 2026-06-03
+
+### Changed
+- **Docs:** Reframed the README enrichment section around `dj enrich metadata` as a single entrypoint that enriches **both** detected (`detected_tracks`) and synced (`sync_tracks`) sources by default, scoped with `--detect`/`--sync`. Clarified that both sources land in the same `enriched_tracks` table and cleaned up the command examples to drop the stale `--detect`-on-every-line framing.
+
 ## [0.1.6.0] - 2026-06-03
 
 ### Added
