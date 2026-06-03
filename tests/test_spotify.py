@@ -101,6 +101,20 @@ def test_unfollow_playlist_hits_followers_endpoint(monkeypatch):
     assert calls == [f"{sp._API}/playlists/pl42/followers"]
 
 
+def test_save_tracks_batches_by_fifty_and_strips_uri(monkeypatch):
+    client = sp.Spotify("dummy")
+    batches = []
+    monkeypatch.setattr(client.client, "put",
+                        lambda url, json=None, **k: batches.append((url, json["ids"])) or _FakeResp(200))
+    ids = [f"spotify:track:{i}" for i in range(120)]
+    saved = client.save_tracks(ids)
+    client.close()
+    assert saved == 120
+    assert [len(b[1]) for b in batches] == [50, 50, 20]
+    assert batches[0][0] == f"{sp._API}/me/tracks"
+    assert batches[0][1][0] == "0"  # uri prefix stripped to bare id
+
+
 def test_clear_saved_tracks_batches_by_fifty(monkeypatch):
     client = sp.Spotify("dummy")
     # 120 liked tracks → 50 + 50 + 20 DELETE batches.

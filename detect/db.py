@@ -1021,6 +1021,25 @@ def list_beatport_playlists() -> list[sqlite3.Row]:
         ).fetchall()
 
 
+def beatport_track_ids_in_playlist(beatport_id: int) -> list[int]:
+    """Catalog track_ids for one captured Beatport playlist (for `playlist push` restore).
+
+    The junction has no position column, so order falls back to insertion order
+    (enriched_track_id). Returns the Beatport catalog ids to re-add on recreation.
+    """
+    with _connect() as con:
+        rows = con.execute(
+            """SELECT e.beatport_id
+               FROM beatport_playlists bp
+               JOIN beatport_playlist_tracks bpt ON bpt.playlist_id = bp.id
+               JOIN enriched_tracks e ON e.id = bpt.enriched_track_id
+               WHERE bp.beatport_id = ? AND e.beatport_id IS NOT NULL
+               ORDER BY bpt.enriched_track_id""",
+            (beatport_id,),
+        ).fetchall()
+    return [r["beatport_id"] for r in rows]
+
+
 def insert_beatport_track(
     artist: str,
     title: str,

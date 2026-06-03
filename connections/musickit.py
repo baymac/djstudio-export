@@ -28,38 +28,6 @@ def _bridge_binary() -> Path:
     return binary
 
 
-def run_bridge(args: list[str], timeout: int = 600) -> subprocess.CompletedProcess:
-    binary = _bridge_binary()
-    return subprocess.run(
-        [str(binary)] + args,
-        capture_output=True, text=True, timeout=timeout,
-    )
-
-
-def check_musickit() -> tuple[bool, str]:
-    """Return (authorized, message). Exit code 2 = not authorized."""
-    try:
-        result = run_bridge(["--check"], timeout=30)
-        if result.returncode == 0:
-            return True, "MusicKit authorized"
-        if result.returncode == 2:
-            return False, (
-                "MusicKit not authorized.\n"
-                "Open the Music app, then re-run this command to grant access."
-            )
-        return False, f"MusicKit check failed (exit {result.returncode}): {result.stderr.strip()}"
-    except Exception as e:
-        return False, f"MusicKit check error: {e}"
-
-
-def list_playlists() -> list[str]:
-    """Return Apple Music playlist names via MusicKit."""
-    result = run_bridge(["--list-playlists"])
-    if result.returncode != 0:
-        raise RuntimeError(f"MusicKit error: {result.stderr.strip()}")
-    return json.loads(result.stdout.strip())
-
-
 def _stream_bridge(args: list[str]):
     """Run the MusicKit bridge with given args and yield track dicts from NDJSON stdout."""
     binary = _bridge_binary()
@@ -256,19 +224,30 @@ def clear_apple_library(batch_size: int = 100) -> int:
 
 
 def build_delete_playlist_applescript(name: str) -> str:
-    """Build the AppleScript that deletes user playlist(s) named `name` from Music.app.
+    """Build the AppleScript that deletes playlist(s) named `name` from Music.app.
 
     MusicKit can't delete library playlists on macOS (same limitation as create),
-    so the supported path is scripting Music.app. Deletes EVERY user playlist with
-    a matching name (Music.app allows duplicate names) and returns how many were
-    removed. The underlying library tracks are untouched — only the playlist (a
-    container) is removed. Pure so it can be unit-tested.
+    so the supported path is scripting Music.app. Deletes EVERY matching playlist
+    (Music.app allows duplicate names) and returns how many were removed. The
+    underlying library tracks are untouched — only the playlist (a container) is
+    removed. Pure so it can be unit-tested.
+
+    Matches `every playlist … whose special kind is none` rather than `every user
+    playlist`: capture also pulls **subscription playlists** (curated Apple Music
+    playlists the user follows, e.g. "<artist> Essentials"), which are NOT
+    `user playlist`s, so a `user playlist` filter silently leaves them behind
+    ("not found in Apple Music"). `special kind is none` admits both user and
+    subscription playlists while excluding the system playlists — Library, Music,
+    Purchased, Downloaded, Genius — whose `special kind` is non-`none`.
     """
+    # NB: `matched` is a reserved term in Music.app's AppleScript dictionary (the
+    # smart-playlist match rule), so `set matched to …` writes a read-only constant
+    # and fails with -10003 "Access not allowed". Use a non-reserved variable name.
     return "\n".join([
         'tell application "Music"',
-        f'set matched to (every user playlist whose name is "{_osa_escape(name)}")',
-        "set n to (count of matched)",
-        "repeat with p in matched",
+        f'set theMatches to (every playlist whose name is "{_osa_escape(name)}" and special kind is none)',
+        "set n to (count of theMatches)",
+        "repeat with p in theMatches",
         "delete p",
         "end repeat",
         "return n as string",
@@ -289,6 +268,34 @@ def delete_apple_playlist(name: str) -> dict:
     except ValueError:
         deleted = 0
     return {"deleted": deleted, "name": name}
+
+
+def read_live_playlist_names() -> set[str]:
+    """Return the names of every deletable playlist currently in Music.app.
+
+    "Deletable" mirrors the delete selector's universe (`special kind is none`):
+    user + subscription playlists, excluding the system playlists (Library, Music,
+    Purchased, …). Used to filter the delete-target list down to what actually still
+    exists — the dj.db backup is permanent and never forgets a playlist, so a
+    playlist deleted in a prior run would otherwise resurface forever as
+    "not found in Apple Music". Returns an empty set on any AppleScript error so the
+    caller falls back to attempting every captured target (no silent data loss).
+    """
+    script = "\n".join([
+        'tell application "Music"',
+        "set nms to (name of (every playlist whose special kind is none))",
+        'set out to ""',
+        "repeat with nm in nms",
+        "   set out to out & nm & linefeed",
+        "end repeat",
+        "return out",
+        "end tell",
+    ])
+    try:
+        out = _run_osascript(script, timeout=120)
+    except RuntimeError:
+        return set()
+    return {line for line in out.split("\n") if line}
 
 
 def create_apple_playlist(name: str, tracks: list[dict]) -> dict:
@@ -312,3 +319,99 @@ def create_apple_playlist(name: str, tracks: list[dict]) -> dict:
     except ValueError:
         added = 0
     return {"created": True, "name": name, "requested": len(tracks), "added": added}
+
+
+# ── Restore helpers (bulk `playlist push --library/--favorite-only/--readd-missing`) ──
+
+
+def library_track_key(title: str | None, artist: str | None) -> str:
+    """Stable name+artist key for matching a track against the library by content.
+
+    Used for `--readd-missing` idempotency: a re-added catalog track gets a fresh
+    persistent id, so we can't match it by the captured one — name+artist is what
+    survives the round-trip.
+    """
+    return f"{(title or '').strip().casefold()}\x00{(artist or '').strip().casefold()}"
+
+
+def read_library_track_keys() -> set[str]:
+    """Return the set of name+artist keys for every track currently in the library.
+
+    One AppleScript call (two `… of every track` reads, zipped in-script) so it's
+    fast even for thousands of tracks. Used to skip tracks already present.
+    """
+    script = "\n".join([
+        'tell application "Music"',
+        "set nms to (name of every track of library playlist 1)",
+        "set ars to (artist of every track of library playlist 1)",
+        'set out to ""',
+        "repeat with i from 1 to (count of nms)",
+        "   set out to out & (item i of nms) & tab & (item i of ars) & linefeed",
+        "end repeat",
+        "return out",
+        "end tell",
+    ])
+    out = _run_osascript(script, timeout=300)
+    keys: set[str] = set()
+    for line in out.split("\n"):
+        if not line:
+            continue
+        name, _, artist = line.partition("\t")
+        keys.add(library_track_key(name, artist))
+    return keys
+
+
+def readd_track_by_catalog_id(catalog_id: str) -> None:
+    """Best-effort: ask Music.app to add a catalog track back to the library.
+
+    macOS has NO supported API to add a catalog track to the library (MusicKit
+    `add` is `@available(macOS, unavailable)`), so this falls back to the `itmss://`
+    store-URL trick `restore_apple_music.py` uses. EXPERIMENTAL and unreliable:
+    region-locked / removed tracks won't add. Fire-and-forget — the caller paces the
+    calls and re-reads `read_library_track_keys()` afterwards to see what landed.
+    """
+    cid = (catalog_id or "").strip()
+    if not cid:
+        return
+    _run_osascript(
+        'tell application "Music" to open location '
+        f'"itmss://itunes.apple.com/song?id={cid}"',
+        timeout=30,
+    )
+
+
+def build_mark_loved_applescript(tracks: list[dict]) -> str:
+    """AppleScript that re-marks each track as loved (persistent id → name+artist). Pure."""
+    lines = ['tell application "Music"', "set n to 0"]
+    for t in tracks:
+        title = _osa_escape(t.get("title") or "")
+        artist = _osa_escape(t.get("artist") or "")
+        pid = _osa_escape(t.get("native_persistent_id") or "")
+        lines.append("set chosen to missing value")
+        if pid:
+            lines.append("try")
+            lines.append(f'set chosen to (first track of library playlist 1 whose persistent ID is "{pid}")')
+            lines.append("end try")
+        lines.append("if chosen is missing value then")
+        lines.append(f'set ms to (every track of library playlist 1 whose name is "{title}" '
+                     f'and artist is "{artist}")')
+        lines.append("if ms is not {} then set chosen to item 1 of ms")
+        lines.append("end if")
+        lines.append("if chosen is not missing value then")
+        lines.append("set loved of chosen to true")
+        lines.append("set n to n + 1")
+        lines.append("end if")
+    lines.append("return n as string")
+    lines.append("end tell")
+    return "\n".join(lines)
+
+
+def mark_loved(tracks: list[dict]) -> int:
+    """Re-mark captured favorite tracks as loved in the library. Returns the count set."""
+    if not tracks:
+        return 0
+    out = _run_osascript(build_mark_loved_applescript(tracks))
+    try:
+        return int(out or "0")
+    except ValueError:
+        return 0

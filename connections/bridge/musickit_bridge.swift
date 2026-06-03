@@ -182,6 +182,10 @@ func streamAllPlaylists() async {
 
     var total = 0
     for playlist in response.items {
+        // "Favourite Songs" is captured authoritatively via --favorites (the
+        // __favorites__ pseudo-playlist); skip it here so it isn't ALSO stored
+        // under its real playlist id as a duplicate. Same exclusion as --list-playlists.
+        if playlist.name == "Favourite Songs" { continue }
         guard let detailed = try? await playlist.with([.tracks]),
               let tracks = detailed.tracks else { continue }
 
