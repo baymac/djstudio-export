@@ -2,12 +2,18 @@
 import connections.musickit as mk
 
 
-def test_delete_applescript_targets_user_playlist_by_name():
+def test_delete_applescript_targets_playlist_by_name():
     script = mk.build_delete_playlist_applescript("Summer Mix")
-    assert 'every user playlist whose name is "Summer Mix"' in script
+    # Matches by name across all playlists, but only deletable ones (special kind
+    # none) — so subscription playlists ("<artist> Essentials") are included while
+    # the system playlists (Library/Music/Purchased) are excluded.
+    assert 'every playlist whose name is "Summer Mix" and special kind is none' in script
     assert "delete p" in script
     # Deletes the container only — returns how many playlists matched.
     assert "return n as string" in script
+    # `matched` is a reserved Music.app term (smart-playlist match rule); using it as
+    # a variable raises -10003 "Access not allowed". Guard against a regression.
+    assert "set matched to" not in script
 
 
 def test_delete_applescript_escapes_quotes():
@@ -78,6 +84,19 @@ def test_mark_loved_applescript_prefers_persistent_id():
     assert 'whose persistent ID is "PID9"' in script
     assert "set loved of chosen to true" in script
     assert 'whose name is "Glue" and artist is "Bicep"' in script  # fallback present
+
+
+def test_live_playlist_names_parses_lines(monkeypatch):
+    monkeypatch.setattr(mk, "_run_osascript", lambda *a, **k: "Detected\nOld anthems\n\n")
+    assert mk.read_live_playlist_names() == {"Detected", "Old anthems"}
+
+
+def test_live_playlist_names_empty_on_error(monkeypatch):
+    def boom(*a, **k):
+        raise RuntimeError("osascript failed")
+    monkeypatch.setattr(mk, "_run_osascript", boom)
+    # Error → empty set so the caller falls back to attempting every captured target.
+    assert mk.read_live_playlist_names() == set()
 
 
 def test_readd_track_noop_on_empty(monkeypatch):

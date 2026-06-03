@@ -1,10 +1,10 @@
-"""`dj enrich --sync` — drives the shared enrich engine over `sync_tracks`.
+"""`dj enrich metadata --sync` — drives the shared enrich engine over `sync_tracks`.
 
 This is the sync-side adapter for `enrich.engine.run_enrich_engine`. It reads
 candidates from the flat `sync_tracks` capture table, writes matches into the one
 deduped `enriched_tracks` table (via `detect.db.upsert_enriched_values`), and records
 the back-link (`sync_tracks.enriched_beatport_id`) on each source row. The matching
-loop itself is 100% shared with `dj enrich --detect`.
+loop itself is 100% shared with `dj enrich metadata --detect`.
 """
 from __future__ import annotations
 
@@ -14,7 +14,7 @@ from sync import db as sync_db
 
 
 class SyncAdapter:
-    """Adapter over `sync_tracks` — backs `dj enrich --sync`."""
+    """Adapter over `sync_tracks` — backs `dj enrich metadata --sync`."""
 
     name = "Sync enrich"
 

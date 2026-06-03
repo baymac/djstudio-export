@@ -41,13 +41,13 @@ Examples:
   uv run dj_cli.py detect instagram https://www.instagram.com/p/abc123/
   uv run dj_cli.py detect mixcloud https://www.mixcloud.com/djname/mixname/
 
-  uv run dj_cli.py sync music                 # capture all Apple Music playlists → sync_tracks
-  uv run dj_cli.py sync beatport               # Beatport playlists → enriched_tracks (checkpoint)
-  uv run dj_cli.py sync music playlist delete --playlists   # delete playlists from the app (dj.db kept)
+  uv run dj_cli.py sync music pull             # capture everything from Apple Music → sync_tracks
+  uv run dj_cli.py sync beatport pull          # Beatport playlists → enriched_tracks (checkpoint)
+  uv run dj_cli.py sync music delete --playlists   # delete playlists from the app (dj.db kept)
 
-  uv run dj_cli.py enrich                       # enrich detected + synced tracks → enriched_tracks
-  uv run dj_cli.py enrich --detect --dry-run    # only detected tracks
-  uv run dj_cli.py enrich --sync                # only synced tracks
+  uv run dj_cli.py enrich metadata              # enrich detected + synced tracks → enriched_tracks
+  uv run dj_cli.py enrich metadata --detect --dry-run    # only detected tracks
+  uv run dj_cli.py enrich metadata --sync       # only synced tracks
   uv run dj_cli.py enrich analyse               # DJ Studio SDK analysis → enriched_tracks_analysis
 
   uv run dj_cli.py export set 42 --to bp_chart

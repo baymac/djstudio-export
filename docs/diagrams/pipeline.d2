@@ -27,11 +27,11 @@ analysis: "enriched_tracks_analysis\nmik_key, mik_nrg, per-stem RMS,\nanalysis_j
   shape: cylinder
 }
 
-apple -> sync_tracks: "dj sync music|spotify"
-sync_tracks -> enriched: "dj enrich --sync"
+apple -> sync_tracks: "dj sync music|spotify pull"
+sync_tracks -> enriched: "dj enrich metadata --sync"
 audio -> detected: "dj detect <platform>"
-detected -> enriched: "dj enrich --detect"
-bp_pl -> enriched: "dj sync beatport\n(pull straight in)"
+detected -> enriched: "dj enrich metadata --detect"
+bp_pl -> enriched: "dj sync beatport pull\n(straight in)"
 enriched -> analysis: "dj enrich analyse\n(drives DJ Studio's SDK headlessly → our DB)" {
   style.bold: true
 }

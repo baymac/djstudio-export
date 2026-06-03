@@ -224,19 +224,30 @@ def clear_apple_library(batch_size: int = 100) -> int:
 
 
 def build_delete_playlist_applescript(name: str) -> str:
-    """Build the AppleScript that deletes user playlist(s) named `name` from Music.app.
+    """Build the AppleScript that deletes playlist(s) named `name` from Music.app.
 
     MusicKit can't delete library playlists on macOS (same limitation as create),
-    so the supported path is scripting Music.app. Deletes EVERY user playlist with
-    a matching name (Music.app allows duplicate names) and returns how many were
-    removed. The underlying library tracks are untouched — only the playlist (a
-    container) is removed. Pure so it can be unit-tested.
+    so the supported path is scripting Music.app. Deletes EVERY matching playlist
+    (Music.app allows duplicate names) and returns how many were removed. The
+    underlying library tracks are untouched — only the playlist (a container) is
+    removed. Pure so it can be unit-tested.
+
+    Matches `every playlist … whose special kind is none` rather than `every user
+    playlist`: capture also pulls **subscription playlists** (curated Apple Music
+    playlists the user follows, e.g. "<artist> Essentials"), which are NOT
+    `user playlist`s, so a `user playlist` filter silently leaves them behind
+    ("not found in Apple Music"). `special kind is none` admits both user and
+    subscription playlists while excluding the system playlists — Library, Music,
+    Purchased, Downloaded, Genius — whose `special kind` is non-`none`.
     """
+    # NB: `matched` is a reserved term in Music.app's AppleScript dictionary (the
+    # smart-playlist match rule), so `set matched to …` writes a read-only constant
+    # and fails with -10003 "Access not allowed". Use a non-reserved variable name.
     return "\n".join([
         'tell application "Music"',
-        f'set matched to (every user playlist whose name is "{_osa_escape(name)}")',
-        "set n to (count of matched)",
-        "repeat with p in matched",
+        f'set theMatches to (every playlist whose name is "{_osa_escape(name)}" and special kind is none)',
+        "set n to (count of theMatches)",
+        "repeat with p in theMatches",
         "delete p",
         "end repeat",
         "return n as string",
@@ -257,6 +268,34 @@ def delete_apple_playlist(name: str) -> dict:
     except ValueError:
         deleted = 0
     return {"deleted": deleted, "name": name}
+
+
+def read_live_playlist_names() -> set[str]:
+    """Return the names of every deletable playlist currently in Music.app.
+
+    "Deletable" mirrors the delete selector's universe (`special kind is none`):
+    user + subscription playlists, excluding the system playlists (Library, Music,
+    Purchased, …). Used to filter the delete-target list down to what actually still
+    exists — the dj.db backup is permanent and never forgets a playlist, so a
+    playlist deleted in a prior run would otherwise resurface forever as
+    "not found in Apple Music". Returns an empty set on any AppleScript error so the
+    caller falls back to attempting every captured target (no silent data loss).
+    """
+    script = "\n".join([
+        'tell application "Music"',
+        "set nms to (name of (every playlist whose special kind is none))",
+        'set out to ""',
+        "repeat with nm in nms",
+        "   set out to out & nm & linefeed",
+        "end repeat",
+        "return out",
+        "end tell",
+    ])
+    try:
+        out = _run_osascript(script, timeout=120)
+    except RuntimeError:
+        return set()
+    return {line for line in out.split("\n") if line}
 
 
 def create_apple_playlist(name: str, tracks: list[dict]) -> dict:

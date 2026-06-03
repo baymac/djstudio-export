@@ -8,7 +8,7 @@ entry: "dj_cli.py\nCLI entrypoint — detect / sync / enrich / export / course /
 }
 
 enrich: "enrich/  — enrichment + DJ Studio analysis" {
-  cli: "cli.py — dj enrich [--detect|--sync]  +  dj enrich analyse"
+  cli: "cli.py — dj enrich metadata [--detect|--sync]  +  dj enrich analyse"
   engine: "engine.py — shared enrich engine → Beatport metadata"
   analyse: "analyse.py — SDK → enriched_tracks_analysis"
   sdk: "studio_sdk.py / dj_studio_sdk.js — SDK driver + Node helper"
@@ -30,11 +30,12 @@ detect: "detect/  — track detection" {
   shazam: "shazam.py / parser.py — recognition + tracklist parsing"
 }
 
-sync: "sync/  — capture Apple Music / Spotify" {
-  cap: "capture.py — dj sync music|spotify → sync_tracks + sync_playlist_tracks"
-  push: "push.py — dj sync <app> playlist push → recreate an app playlist"
-  ad: "enrich_adapter.py — dj enrich --sync → enrich/engine"
-  db: "db.py / cli.py — canonical store + membership; dispatch"
+sync: "sync/  — capture / restore / delete Apple Music · Spotify · Beatport" {
+  cap: "capture.py — dj sync <app> pull → sync_tracks + sync_playlist_tracks"
+  push: "push.py — dj sync <app> push --name → recreate an app playlist"
+  restore: "restore.py — dj sync <app> push --all/--playlists/--library → rebuild app"
+  ad: "enrich_adapter.py — dj enrich metadata --sync → enrich/engine"
+  db: "db.py / cli.py — canonical store + membership; pull/list/push/delete dispatch"
 }
 
 playlist: "playlist/  — SQL → rows helper" {

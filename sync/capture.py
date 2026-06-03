@@ -3,7 +3,7 @@
 No genre classification, no Beatport calls. Each playlist becomes a set of rows in
 the flat `sync_tracks` table (one row per entry, ordered, duplicates preserved),
 tagged with the playlist's stable id so it can be re-imported into the app later.
-Enrichment is a separate step (`dj enrich --sync`).
+Enrichment is a separate step (`dj enrich metadata --sync`).
 """
 from __future__ import annotations
 
@@ -35,32 +35,55 @@ LIBRARY_CURSOR_KEY = "apple_music_library"
 
 def run_sync_music(
     *,
+    scope: str = "all",
     playlist: str | None = None,
-    use_library: bool = False,
-    use_favorites: bool = False,
-    use_all: bool = False,
     limit: int = 0,
     verbose: bool = False,
     dry_run: bool = False,
 ) -> None:
+    """Capture Apple Music into sync_tracks. `scope` is one of:
+
+      * "playlists" — all user playlists ONLY (Favourite Songs excluded).
+      * "library"   — the library songs AND the Favourite Songs collection.
+      * "all"       — both of the above (the default).
+
+    A named `playlist` overrides scope to that one user playlist.
+    """
+    from paths import command_logger
+
+    with command_logger("sync-music", console) as log_path:
+        console.print(f"[dim]Log: {log_path}[/dim]")
+        _run_sync_music_impl(
+            scope=scope,
+            playlist=playlist,
+            limit=limit,
+            verbose=verbose,
+            dry_run=dry_run,
+        )
+
+
+def _run_sync_music_impl(
+    *,
+    scope: str,
+    playlist: str | None,
+    limit: int,
+    verbose: bool,
+    dry_run: bool,
+) -> None:
     if dry_run:
         console.print("[yellow]DRY RUN[/yellow] — no changes will be made")
 
-    # No scope given → capture EVERYTHING (playlists + library + Favourite Songs).
-    # A named --playlist or an explicit --library/--favorite-only narrows it instead.
-    if not (use_library or use_favorites or playlist):
-        use_all = True
-    do_library = use_all or use_library
-    do_favorites = use_all or use_favorites
-    do_playlists = use_all or (not use_library and not use_favorites)
+    do_playlists = bool(playlist) or scope in ("playlists", "all")
+    do_library = not playlist and scope in ("library", "all")
 
     try:
         if do_playlists:
             _capture_all_playlists(playlist, limit, verbose, dry_run)
         if do_library:
-            _capture_library(limit, verbose, dry_run)
-        if do_favorites:
+            # "library" means the whole personal collection: loved Favourite Songs
+            # + every library song.
             _capture_favorites(limit, verbose, dry_run)
+            _capture_library(limit, verbose, dry_run)
     except RuntimeError as e:
         console.print(f"[red]MusicKit error:[/red] {e}")
         sys.exit(1)
@@ -122,22 +145,55 @@ def _capture_all_playlists(playlist: str | None, limit: int, verbose: bool, dry_
         console.print("[dim]No matching playlists captured.[/dim]")
         return
 
+    console.print(f"Found [bold]{len(groups)}[/bold] playlists")
+
     total = 0
-    for npid, g in groups.items():
-        rows = g["rows"]
-        _attach_persistent_ids(g["name"], rows)
-        if dry_run:
-            console.print(f"  [dim]would capture[/dim] {g['name']}: {len(rows)} tracks")
-        else:
-            sync_db.replace_playlist(APP, npid, rows)
-            if verbose:
-                console.print(f"  [green]captured[/green] {g['name']}: {len(rows)} tracks")
-        total += len(rows)
+    total_new = total_skipped = total_removed = 0
+
+    progress = Progress(
+        SpinnerColumn(),
+        TextColumn("[progress.description]{task.description}"),
+        BarColumn(),
+        MofNCompleteColumn(),
+        TaskProgressColumn(),
+        TimeElapsedColumn(),
+        console=console,
+    )
+
+    with progress:
+        for npid, g in groups.items():
+            name = g["name"]
+            rows = g["rows"]
+            task = progress.add_task(f"[cyan]{name}[/cyan]", total=None)
+            _attach_persistent_ids(name, rows)
+            progress.update(task, total=len(rows), completed=len(rows))
+
+            if dry_run:
+                progress.update(task, description=f"[cyan]{name}[/cyan]  {len(rows)} tracks (dry run)")
+                total += len(rows)
+                continue
+
+            stats = sync_db.replace_playlist(APP, npid, rows)
+            total_new += stats["new"]
+            total_skipped += stats["kept"]
+            total_removed += stats["removed"]
+            total += stats["total"]
+            removed_part = f", {stats['removed']} removed" if stats["removed"] else ""
+            progress.update(
+                task,
+                description=f"[cyan]{name}[/cyan]  +{stats['new']} new, {stats['kept']} skipped{removed_part}",
+            )
 
     console.print()
     console.print(f"[bold]Capture {'(dry run) ' if dry_run else ''}complete[/bold]")
     console.print(f"  Playlists: {len(groups)}")
-    console.print(f"  Tracks:    {total}")
+    if dry_run:
+        console.print(f"  Tracks:    {total}")
+    else:
+        console.print(f"  New:       {total_new}")
+        console.print(f"  Skipped:   {total_skipped}")
+        if total_removed:
+            console.print(f"  Removed:   {total_removed}")
 
 
 def _capture_favorites(limit: int, verbose: bool, dry_run: bool) -> None:
@@ -165,22 +221,25 @@ def _capture_favorites(limit: int, verbose: bool, dry_run: bool) -> None:
 
 def run_sync_spotify(
     *,
+    scope: str = "all",
     playlist: str | None = None,
-    use_library: bool = False,
-    use_all: bool = False,
     limit: int = 0,
     verbose: bool = False,
     dry_run: bool = False,
 ) -> None:
-    """Faithful capture of the user's Spotify playlists/library into sync_tracks."""
+    """Faithful capture of the user's Spotify playlists/library into sync_tracks.
+
+    `scope` is one of "playlists" (all playlists, Liked Songs excluded),
+    "library" (Liked Songs only), or "all" (both, the default). A named
+    `playlist` overrides scope to that one playlist.
+    """
     from paths import command_logger
 
     with command_logger("sync-spotify", console) as log_path:
         console.print(f"[dim]Log: {log_path}[/dim]")
         _run_sync_spotify_impl(
+            scope=scope,
             playlist=playlist,
-            use_library=use_library,
-            use_all=use_all,
             limit=limit,
             verbose=verbose,
             dry_run=dry_run,
@@ -189,9 +248,8 @@ def run_sync_spotify(
 
 def _run_sync_spotify_impl(
     *,
+    scope: str,
     playlist: str | None,
-    use_library: bool,
-    use_all: bool,
     limit: int,
     verbose: bool,
     dry_run: bool,
@@ -212,10 +270,8 @@ def _run_sync_spotify_impl(
         # Liked Songs is modelled as a single pseudo-playlist so the logging path
         # is identical to the per-playlist one. No scope given → capture EVERYTHING
         # (playlists + Liked Songs); --library = Liked Songs only; --playlist narrows.
-        if not (use_library or playlist):
-            use_all = True
-        do_library = use_all or use_library
-        do_playlists = use_all or not use_library
+        do_playlists = bool(playlist) or scope in ("playlists", "all")
+        do_library = not playlist and scope in ("library", "all")
         targets = []
         if do_playlists:
             console.print("Fetching Spotify playlists…")

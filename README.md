@@ -37,7 +37,7 @@ DJ Studio must be **closed** before `dj enrich analyse`.
 <!-- Diagram source: docs/diagrams/pipeline.d2 — edit that and re-run scripts/build-diagrams.sh -->
 
 
-Sync capture (`sync_tracks`/`sync_playlist_tracks`) is non-destructive — see the `dj sync` section. Pulling your existing Beatport playlists straight into `enriched_tracks` (the checkpoint) is done with `dj sync beatport`.
+Sync capture (`sync_tracks`/`sync_playlist_tracks`) is non-destructive — see the `dj sync` section. Pulling your existing Beatport playlists straight into `enriched_tracks` (the checkpoint) is done with `dj sync beatport pull`.
 
 Each enrichment step is idempotent. `enriched_tracks_analysis` carries `dj_studio_at`; re-runs only pick up new work. You can stop at any point — every step is independently useful. A row exists in `enriched_tracks_analysis` only after `enrich analyse` has populated it; `enriched_tracks` carries everything Beatport-derived without any sibling rows in the analysis table. (A former rekordbox phrase round-trip was removed; the `rk_analysis_json` / `rekordbox_*_at` columns remain for old data but are no longer written.)
 
@@ -49,19 +49,22 @@ Every verb + its flags:
 
 ```
 dj
-├── sync                                                capture source-app libraries → enriched library
-│   ├── music    [--all] [--playlist NAME] [--library] [--favorite-only] [--limit N] [--dry-run] [--verbose]   (default/--all = playlists + library + Favourite Songs)
-│   │   └── playlist
-│   │       ├── list                                    Captured playlists + ids
-│   │       ├── delete  (--all | --playlists) [--no-sync] [--yes] [--dry-run]   Delete from the APP (dj.db backup kept)
-│   │       └── push    --name NAME (--ids ID,… | --query SQL)  |  restore: --all|--playlists|--library|--favorite-only [--readd-missing] [--dry-run]
-│   ├── spotify  [--all] [--playlist NAME] [--library] [--limit N] [--dry-run] [--verbose]   (default/--all = playlists + Liked Songs)
-│   │   └── playlist   list | delete (--all|--playlists) … | push --name … (--ids|--query) | restore --all|--playlists|--library
-│   └── beatport [--all] [--playlist NAME] [--limit N] [--dry-run] [--verbose]   Pull Beatport playlists → enriched_tracks
-│       └── playlist
-│           ├── list
-│           ├── delete  --all [--no-sync] [--yes] [--dry-run]            Delete every Beatport playlist (enriched_tracks kept)
-│           └── push    --name NAME (--ids ID,… | --query SQL)  |  --all (restore every captured playlist)
+├── sync                                                capture / restore / delete source-app playlists
+│   │   Scope flags (same meaning for pull/push/delete): --playlists = user playlists only
+│   │   (Apple: excl. Favourite Songs; Spotify: excl. Liked Songs); --library = the personal
+│   │   collection (Apple: library + Favourite Songs; Spotify: Liked Songs); --all = both.
+│   │   Beatport has only --all.
+│   ├── music | spotify
+│   │   ├── pull    [--playlists|--library|--all] [--playlist NAME] [--limit N] [--dry-run] [-v]   capture → dj.db (default --all)
+│   │   ├── list                                        Captured playlists + ids
+│   │   ├── push    [--playlists|--library|--all] [--readd-missing*] [--dry-run]   restore from dj.db (*music only)
+│   │   │           |  --name NAME (--ids ID,… | --query SQL)                      ad-hoc selection → app playlist
+│   │   └── delete  (--playlists | --library | --all) [--no-sync] [--yes] [--dry-run]   Delete from the APP (dj.db kept)
+│   └── beatport                                        --all is the only scope (no library/liked concept)
+│       ├── pull    [--all] [--playlist NAME] [--limit N] [--dry-run] [-v]   Beatport playlists → enriched_tracks
+│       ├── list
+│       ├── push    --all (restore every captured playlist)  |  --name NAME (--ids ID,… | --query SQL)
+│       └── delete  --all [--no-sync] [--yes] [--dry-run]    Delete every Beatport playlist (enriched_tracks kept)
 │
 ├── detect                                              detect tracks (Shazam audio + tracklist parsers)
 │   ├── instagram      <url>  [-u USER] [-p PASS] [-o FILE] [--json] [--dry-run]
@@ -121,53 +124,51 @@ To bootstrap, sign into beatport.com in your default browser — every Beatport 
 Faithfully captures your Apple Music and Spotify playlists into the local DB, then enriches them against Beatport. Capture is **non-destructive**: tracks land in a canonical `sync_tracks` store (deduped per app by native id, else artist+title) and playlist membership is tracked separately in `sync_playlist_tracks`. Re-syncing a playlist re-snapshots only its membership — removed tracks lose their link but their captured data is never deleted, so a delete on the app's side can't wipe your backup. This mirrors the Beatport side (`enriched_tracks` + `beatport_playlist_tracks`).
 
 ```bash
-# Capture (faithful, → sync_tracks + sync_playlist_tracks)
-uv run dj_cli.py sync music                          # EVERYTHING (default): all playlists + library + Favourite Songs
-uv run dj_cli.py sync music --library                # only library songs (incremental via cursor)
-uv run dj_cli.py sync music --favorites              # only Favourite Songs (alias: --favorite-only)
-uv run dj_cli.py sync music --library --favorite-only # only those two (combinable)
-uv run dj_cli.py sync music --playlist "Ibiza 2026"  # only one named playlist
-uv run dj_cli.py sync spotify                        # EVERYTHING (default): all playlists + Liked Songs (OAuth on first run)
-uv run dj_cli.py sync spotify --library              # only Liked Songs
-#   --all is the explicit form of the default; a named --playlist or scope flag narrows it.
+# Pull (faithful capture, → sync_tracks + sync_playlist_tracks)
+uv run dj_cli.py sync music pull                       # EVERYTHING (default --all): playlists + library + Favourite Songs
+uv run dj_cli.py sync music pull --playlists           # only user playlists (excludes Favourite Songs)
+uv run dj_cli.py sync music pull --library             # only library songs + Favourite Songs (incremental via cursor)
+uv run dj_cli.py sync music pull --playlist "Ibiza 2026"  # only one named playlist
+uv run dj_cli.py sync spotify pull                     # EVERYTHING (default --all): all playlists + Liked Songs (OAuth on first run)
+uv run dj_cli.py sync spotify pull --library           # only Liked Songs
 #   common flags: --limit N --dry-run --verbose
 
-# Enrich captured tracks → enriched_tracks (`dj enrich` covers both sources)
-uv run dj_cli.py enrich --sync
-uv run dj_cli.py enrich --sync --retry-misses
+# Enrich captured tracks → enriched_tracks (`dj enrich metadata` covers both sources)
+uv run dj_cli.py enrich metadata --sync
+uv run dj_cli.py enrich metadata --sync --retry-misses
 
 # Pull your Beatport playlists straight into enriched_tracks (checkpoint)
-uv run dj_cli.py sync beatport
+uv run dj_cli.py sync beatport pull
 
-# Inspect / restore captured playlists (every source supports list | delete | push)
-uv run dj_cli.py sync music   playlist list
-uv run dj_cli.py sync spotify playlist push --name "Mirror" --query "SELECT t.* FROM sync_tracks t JOIN sync_playlist_tracks m ON m.sync_track_id=t.id WHERE m.app='spotify' AND m.native_playlist_id='<id>' ORDER BY m.position"
-uv run dj_cli.py sync beatport playlist push --name "Peak Tech" --query "SELECT beatport_id FROM enriched_tracks WHERE genre='Tech House'"   # beatport push selects by beatport_id (same engine as `dj export beatport`)
+# Inspect / push captured playlists (every source supports pull | list | push | delete)
+uv run dj_cli.py sync music   list
+uv run dj_cli.py sync spotify push --name "Mirror" --query "SELECT t.* FROM sync_tracks t JOIN sync_playlist_tracks m ON m.sync_track_id=t.id WHERE m.app='spotify' AND m.native_playlist_id='<id>' ORDER BY m.position"
+uv run dj_cli.py sync beatport push --name "Peak Tech" --query "SELECT beatport_id FROM enriched_tracks WHERE genre='Tech House'"   # beatport push selects by beatport_id (same engine as `dj export beatport`)
 
-# Declutter the SOURCE APP — delete playlists from Apple Music / Spotify / Beatport.
-# Removes from the app only; your dj.db backup is ALWAYS kept. Offers to sync the
+# Declutter the SOURCE APP — delete from Apple Music / Spotify / Beatport.
+# Removes from the app only; your dj.db backup is ALWAYS kept. Offers to pull the
 # latest first so the backup is current, then asks once before deleting.
-uv run dj_cli.py sync music   playlist delete --playlists   # all playlists incl. Favourite Songs (library kept)
-uv run dj_cli.py sync music   playlist delete --all         # the above + clears the Apple Music library
-uv run dj_cli.py sync spotify playlist delete --playlists   # unfollow all playlists (Liked Songs kept)
-uv run dj_cli.py sync spotify playlist delete --all         # the above + clears Liked Songs
-uv run dj_cli.py sync beatport playlist delete --all --yes  # every Beatport playlist, no prompts
+uv run dj_cli.py sync music   delete --playlists   # delete all user playlists (Favourite Songs + library kept)
+uv run dj_cli.py sync music   delete --library     # clear the library + Favourite Songs (playlists kept)
+uv run dj_cli.py sync music   delete --all         # both
+uv run dj_cli.py sync spotify delete --playlists   # unfollow all playlists (Liked Songs kept)
+uv run dj_cli.py sync spotify delete --all         # the above + clears Liked Songs
+uv run dj_cli.py sync beatport delete --all --yes  # every Beatport playlist, no prompts
 
-# Restore the SOURCE APP from the dj.db backup. Inverse of delete.
-uv run dj_cli.py sync music    playlist push --playlists                 # recreate all playlists (matches in-library tracks)
-uv run dj_cli.py sync music    playlist push --library --readd-missing   # repopulate the library; only re-add what's missing (resumable)
-uv run dj_cli.py sync music    playlist push --favorite-only             # re-mark captured favorites as loved
-uv run dj_cli.py sync music    playlist push --all --readd-missing       # library + playlists + favorites
-uv run dj_cli.py sync spotify  playlist push --playlists                 # recreate all playlists (adds tracks by id)
-uv run dj_cli.py sync spotify  playlist push --library                   # re-save Liked Songs
-uv run dj_cli.py sync spotify  playlist push --all                       # Liked Songs + all playlists
-uv run dj_cli.py sync beatport playlist push --all                       # recreate every Beatport playlist on the account
-#   Apple Music catalog re-add (--library/--favorite-only/--readd-missing) is best-effort via the
+# Restore the SOURCE APP from the dj.db backup. Inverse of delete (same scope flags).
+uv run dj_cli.py sync music    push --playlists                 # recreate all playlists (matches in-library tracks)
+uv run dj_cli.py sync music    push --library --readd-missing   # repopulate library + favorites; only re-add what's missing (resumable)
+uv run dj_cli.py sync music    push --all --readd-missing       # playlists + library + favorites
+uv run dj_cli.py sync spotify  push --playlists                 # recreate all playlists (adds tracks by id)
+uv run dj_cli.py sync spotify  push --library                   # re-save Liked Songs
+uv run dj_cli.py sync spotify  push --all                       # Liked Songs + all playlists
+uv run dj_cli.py sync beatport push --all                       # recreate every Beatport playlist on the account
+#   Apple Music catalog re-add (--library/--readd-missing) is best-effort via the
 #   itmss:// trick — region-locked/removed tracks can't be re-added on macOS, and are skipped.
 #   Spotify & Beatport restore are exact (the APIs add tracks by id; no re-add hack needed).
 ```
 
-Spotify auth uses an Authorization-Code OAuth flow on first run (set `SPOTIFY_CLIENT_ID`/`SPOTIFY_CLIENT_SECRET`, redirect `http://127.0.0.1:8888/callback`); the refresh token is cached in `auth_cache`. Spotify's own algorithmic/editorial playlists (Discover Weekly, Release Radar, …) return 404 on their tracks endpoint and are skipped, not fatal. `dj sync music --library` tracks the last `library_added_date` in the `cursors` table so re-runs only capture new Apple Music additions. Logs: `~/Music/dj/logs/sync-spotify/` and `~/Music/dj/logs/sync-beatport/`.
+Spotify auth uses an Authorization-Code OAuth flow on first run (set `SPOTIFY_CLIENT_ID`/`SPOTIFY_CLIENT_SECRET`, redirect `http://127.0.0.1:8888/callback`); the refresh token is cached in `auth_cache`. Spotify's own algorithmic/editorial playlists (Discover Weekly, Release Radar, …) return 404 on their tracks endpoint and are skipped, not fatal. `dj sync music pull --library` tracks the last `library_added_date` in the `cursors` table so re-runs only capture new Apple Music additions. Logs: `~/Music/dj/logs/sync-spotify/` and `~/Music/dj/logs/sync-beatport/`.
 
 ---
 
@@ -296,16 +297,16 @@ Each match writes one row to `enriched_tracks` carrying every Beatport-derived f
 
 Beatport-sourced data is fetched **only** here (and inline-extracted by `sync beatport` from the playlist response). `enrich analyse` does not call Beatport.
 
-`dj enrich` enriches both detected and synced tracks by default; scope it with `--detect` or `--sync`.
+`dj enrich metadata` enriches both detected and synced tracks by default; scope it with `--detect` or `--sync`.
 
 ```bash
-uv run dj_cli.py enrich                               # enrich detected + synced tracks
-uv run dj_cli.py enrich --detect                      # only detected tracks
-uv run dj_cli.py enrich --detect --dry-run
-uv run dj_cli.py enrich --detect --limit 50
-uv run dj_cli.py enrich --detect --verbose            # print per-track Beatport detail
-uv run dj_cli.py enrich --detect --threshold 0.8      # stricter match (default: 0.72)
-uv run dj_cli.py enrich --detect --retry-misses       # retry previously missed tracks
+uv run dj_cli.py enrich metadata                      # enrich detected + synced tracks
+uv run dj_cli.py enrich metadata --detect             # only detected tracks
+uv run dj_cli.py enrich metadata --detect --dry-run
+uv run dj_cli.py enrich metadata --detect --limit 50
+uv run dj_cli.py enrich metadata --detect --verbose            # print per-track Beatport detail
+uv run dj_cli.py enrich metadata --detect --threshold 0.8      # stricter match (default: 0.72)
+uv run dj_cli.py enrich metadata --detect --retry-misses       # retry previously missed tracks
 ```
 
 Log written to `~/Music/dj/logs/enrich/YYYY-MM-DD_<run_id>.log`. Every other command writes to `~/Music/dj/logs/<command>/YYYY-MM-DD_<HHMMSS>.log` automatically.
@@ -317,13 +318,13 @@ Log written to `~/Music/dj/logs/enrich/YYYY-MM-DD_<run_id>.log`. Every other com
 For tracks already in your Beatport library (bought, favourited, in playlists), there is no detection step — just sync them straight into `enriched_tracks`. The catalog-detail extras (`mix_name`/`label`/`isrc`/`sub_genre`/`length_ms`) are pulled inline from the same playlist response so no extra HTTP call per track is needed.
 
 ```bash
-uv run dj_cli.py sync beatport
-uv run dj_cli.py sync beatport --dry-run
-uv run dj_cli.py sync beatport --limit 100
-uv run dj_cli.py sync beatport --verbose
+uv run dj_cli.py sync beatport pull
+uv run dj_cli.py sync beatport pull --dry-run
+uv run dj_cli.py sync beatport pull --limit 100
+uv run dj_cli.py sync beatport pull --verbose
 ```
 
-`enrich --detect` and `sync beatport` produce identical-shaped rows in `enriched_tracks`. Analysis doesn't care which path a row came from.
+`enrich metadata --detect` and `sync beatport pull` produce identical-shaped rows in `enriched_tracks`. Analysis doesn't care which path a row came from.
 
 ---
 
@@ -352,7 +353,7 @@ Uses your DJ Studio account + the bundled SDK to fetch full Beatport tracks, run
 
 **`cf.dj.studio`** is DJ Studio's Cloudflare-hosted classification API. The local WASM extracts pitch/energy features; the server classifies them into a Camelot key + 1-10 energy + segment boundaries + cue points. Same flow the desktop app uses internally — verified bit-identical output for `mik_key`/`mik_nrg`/`bpm`/`duration`/`beat_count` against tracks DJ Studio analysed via its UI. (DJ Studio applies some display-time post-processing — rounded BPM, segment merging, cue trimming, BP-key override of mikKey — that we deliberately skip to keep the fuller raw signal.)
 
-This command runs `caffeinate -i` automatically — your Mac won't sleep mid-run. Same applies to `dj enrich` (sequential Beatport API calls) and `detect radio-garden` (indefinite monitoring loop).
+This command runs `caffeinate -i` automatically — your Mac won't sleep mid-run. Same applies to `dj enrich metadata` (sequential Beatport API calls) and `detect radio-garden` (indefinite monitoring loop).
 
 ```bash
 # Small sanity-check batch
@@ -531,7 +532,7 @@ All tables live in `~/Music/dj/dj.db`.
 | `rejected_gems` | `detect gems` | Tracks the user rejected during gem review (source, artist, title, url, release_date). Excluded from future scans on that source. Indexed on `(source, release_date)` for the cross-run dedup "fade" query. |
 | `enriched_tracks` | `enrich --detect`, `sync beatport` | All Beatport-derived data on one row: id, detected_track_id, beatport_id, beatport_link, bpm, key, genre, release_date, artist, title, apple_music_url, enriched_at, plus the catalog-detail extras (mix_name, label, catalog_number, isrc, sub_genre, length_ms). |
 | `enriched_tracks_analysis` | `enrich analyse` creates rows | Sparse — only tracks that have been through `enrich analyse`. Keyed on `beatport_id` (PK). Carries the DJ Studio analysis fields (mik_key, mik_nrg, mik_key_secondary, mik_key_confidence, tempo_precise, duration_sec, cue_points_count, vocals/drums/bass/melody {avg,peak}, analysis_json with full energy segments + 1Hz stem curves + per-segment stem RMS) + `dj_studio_at`. The `rk_analysis_json` / `rekordbox_export_at` / `rekordbox_analysis_at` columns survive from the removed rekordbox round-trip but are no longer written. JOIN with `enriched_tracks` for the basic+catalog fields. |
-| `enrich_runs` | `enrich --detect` | Per-run summary: seen / found / not_found / fuzzy_miss / status. |
+| `enrich_runs` | `enrich metadata --detect` | Per-run summary: seen / found / not_found / fuzzy_miss / status. |
 | `deleted_sessions` | `detect *-delete-session` | Audit log of deleted sessions. |
 | `sync_tracks` | `sync music`/`sync spotify` | Canonical captured tracks, one row per `(app, dedup_key)` (native id, else artist+title). Append-only/upsert — never deleted by a re-sync. Carries `enrich_outcome` / `enriched_beatport_id` once per unique track. |
 | `sync_playlist_tracks` | `sync music`/`sync spotify` | Playlist membership: `(app, native_playlist_id, playlist_name, sync_track_id, position)`. Re-snapshotted per playlist sync; a removed track loses its link but keeps its `sync_tracks` row. |

@@ -1,18 +1,18 @@
 """Argparse CLI for `dj enrich` — the single home for building the enriched library.
 
-`dj enrich` runs Beatport metadata enrichment over BOTH track sources by default:
+Two verbs:
 
-  * detected tracks  (`detected_tracks` → `enriched_tracks`, via `enrich.engine`)
-  * synced tracks     (`sync_tracks`     → `enriched_tracks`, via `sync.enrich_adapter`)
+  * `metadata` runs Beatport metadata enrichment over BOTH track sources by default:
+      - detected tracks  (`detected_tracks` → `enriched_tracks`, via `enrich.engine`)
+      - synced tracks     (`sync_tracks`     → `enriched_tracks`, via `sync.enrich_adapter`)
+    Scope it to one source with `--detect` or `--sync`.
+  * `analyse` runs DJ Studio's headless SDK analysis over the enriched tracks and
+    writes the result to `enriched_tracks_analysis` (no DJ Studio filesystem writes).
 
-Scope it to one source with `--detect` or `--sync`. A second verb, `analyse`, runs
-DJ Studio's headless SDK analysis over the enriched tracks and writes the result
-to `enriched_tracks_analysis` (no DJ Studio filesystem writes).
-
-  dj enrich                       enrich detected + synced tracks (default: both)
-  dj enrich --detect              only detected tracks
-  dj enrich --sync                only synced tracks
-  dj enrich [--dry-run] [--limit N] [--verbose] [--threshold F] [--retry-misses]
+  dj enrich metadata              enrich detected + synced tracks (default: both)
+  dj enrich metadata --detect     only detected tracks
+  dj enrich metadata --sync       only synced tracks
+  dj enrich metadata [--dry-run] [--limit N] [--verbose] [--threshold F] [--retry-misses]
   dj enrich analyse [--ids ID,...] [--limit N] [--force] [--retry-failed] [--verbose]
 """
 from __future__ import annotations
@@ -30,25 +30,30 @@ console = Console()
 def add_enrich_subparser(parent) -> argparse.ArgumentParser:
     enrich_p = parent.add_parser(
         "enrich",
-        help="Enrich detected + synced tracks with Beatport metadata; `analyse` runs DJ Studio SDK.",
+        help="Build the enriched library: `metadata` (Beatport) + `analyse` (DJ Studio SDK).",
     )
-    enrich_p.add_argument("--detect", dest="only_detect", action="store_true",
-                          help="Only enrich detected tracks (detected_tracks).")
-    enrich_p.add_argument("--sync", dest="only_sync", action="store_true",
-                          help="Only enrich synced tracks (sync_tracks).")
-    enrich_p.add_argument("--dry-run", action="store_true",
-                          help="Show what would be enriched without writing to DB.")
-    enrich_p.add_argument("--limit", type=int, default=0, metavar="N",
-                          help="Stop after N tracks per source (0 = no limit).")
-    enrich_p.add_argument("--verbose", "-v", action="store_true",
-                          help="Print Beatport search details.")
-    enrich_p.add_argument("--threshold", type=float, default=matching.MATCH_THRESHOLD, metavar="F",
-                          help=f"Fuzzy match threshold 0-1 (default: {matching.MATCH_THRESHOLD}).")
-    enrich_p.add_argument("--retry-misses", "-r", action="store_true",
-                          help="Retry tracks that previously had no results or a fuzzy miss.")
-
     en_sub = enrich_p.add_subparsers(dest="enrich_command")
     en_sub.required = False
+
+    # ── metadata (Beatport metadata → enriched_tracks) ──────────────────────────
+    md_p = en_sub.add_parser(
+        "metadata",
+        help="Enrich detected + synced tracks with Beatport metadata (default: both sources).",
+    )
+    md_p.add_argument("--detect", dest="only_detect", action="store_true",
+                      help="Only enrich detected tracks (detected_tracks).")
+    md_p.add_argument("--sync", dest="only_sync", action="store_true",
+                      help="Only enrich synced tracks (sync_tracks).")
+    md_p.add_argument("--dry-run", action="store_true",
+                      help="Show what would be enriched without writing to DB.")
+    md_p.add_argument("--limit", type=int, default=0, metavar="N",
+                      help="Stop after N tracks per source (0 = no limit).")
+    md_p.add_argument("--verbose", "-v", action="store_true",
+                      help="Print Beatport search details.")
+    md_p.add_argument("--threshold", type=float, default=matching.MATCH_THRESHOLD, metavar="F",
+                      help=f"Fuzzy match threshold 0-1 (default: {matching.MATCH_THRESHOLD}).")
+    md_p.add_argument("--retry-misses", "-r", action="store_true",
+                      help="Retry tracks that previously had no results or a fuzzy miss.")
 
     # ── analyse (DJ Studio SDK → enriched_tracks_analysis) ──────────────────────
     an_p = en_sub.add_parser(
@@ -78,10 +83,17 @@ def dispatch(args, enrich_p: argparse.ArgumentParser) -> None:
     migrate()
     sync_db.init_db()
 
-    if getattr(args, "enrich_command", None) == "analyse":
+    cmd = getattr(args, "enrich_command", None)
+    if cmd == "analyse":
         _run_analyse(args)
         return
+    if cmd == "metadata":
+        _run_metadata(args)
+        return
+    enrich_p.print_help()
 
+
+def _run_metadata(args) -> None:
     only_detect = getattr(args, "only_detect", False)
     only_sync = getattr(args, "only_sync", False)
     if only_detect and only_sync:

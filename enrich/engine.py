@@ -1,8 +1,8 @@
 """Enrich tracks with Beatport metadata (bpm, key, genre, release_date, beatport_id, beatport_link).
 
 The matching/search loop is a SHARED ENGINE (`run_enrich_engine`) parameterised by a
-`SourceAdapter`. `dj enrich --detect` drives it with `DetectAdapter` (candidates from
-`detected_tracks`); `dj enrich --sync` drives the same engine with a sync adapter
+`SourceAdapter`. `dj enrich metadata --detect` drives it with `DetectAdapter` (candidates from
+`detected_tracks`); `dj enrich metadata --sync` drives the same engine with a sync adapter
 (candidates from `sync_tracks`) — see `sync/enrich_adapter.py`. Both write to the one
 deduped `enriched_tracks` table. "Keep the code the same" is literal: one loop, two
 thin persistence adapters.

@@ -1,27 +1,26 @@
 """sync/restore.py — bulk Apple Music restore orchestration (musickit + db mocked)."""
-from types import SimpleNamespace
-
 import sync.restore as restore
 from sync.cli import _restore_scopes
 
 
-def _ns(**kw):
-    base = dict(restore_all=False, restore_library=False, restore_playlists=False,
-                restore_favorites=False)
-    base.update(kw)
-    return SimpleNamespace(**base)
+def test_restore_scopes_music_all_expands():
+    # Apple Music --all → playlists + the whole personal collection (library + favorites).
+    assert _restore_scopes("music", "all") == {"library", "playlists", "favorites"}
 
 
-def test_restore_scopes_all_expands():
-    assert _restore_scopes(_ns(restore_all=True)) == {"library", "playlists", "favorites"}
+def test_restore_scopes_music_library_covers_favorites():
+    # --library means the personal collection, so it restores library AND favorites.
+    assert _restore_scopes("music", "library") == {"library", "favorites"}
 
 
-def test_restore_scopes_combine_library_and_favorites():
-    assert _restore_scopes(_ns(restore_library=True, restore_favorites=True)) == {"library", "favorites"}
+def test_restore_scopes_music_playlists_only():
+    assert _restore_scopes("music", "playlists") == {"playlists"}
 
 
-def test_restore_scopes_none():
-    assert _restore_scopes(_ns()) == set()
+def test_restore_scopes_spotify():
+    assert _restore_scopes("spotify", "all") == {"library", "playlists"}
+    assert _restore_scopes("spotify", "library") == {"library"}
+    assert _restore_scopes("spotify", "playlists") == {"playlists"}
 
 
 def _row(title, cid="c", pid="p"):
