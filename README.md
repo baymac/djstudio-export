@@ -289,24 +289,28 @@ For strict genre accuracy, prefer **Beatport** — it is the only source with an
 
 ---
 
-# Enrich detected tracks with Beatport metadata
+# Enrich tracks with Beatport metadata
 
-Takes everything in `detected_tracks` that doesn't have a Beatport match yet, fuzzy-matches each one against Beatport search, and pulls full track metadata. Tracks with no result or score below threshold are marked on `detected_tracks.enrich_outcome` (`not_found` or `fuzzy_miss`) and skipped on future runs.
+`dj enrich metadata` is the single entrypoint for Beatport enrichment. It runs over **both** track sources by default:
 
-Each match writes one row to `enriched_tracks` carrying every Beatport-derived field on the same row: the basic search-result fields (`bpm`, `key`, `genre`, `release_date`, `beatport_id`, `beatport_link`, `artist`, `title`, `apple_music_url`) plus the catalog-detail extras (`mix_name`, `label`, `catalog_number`, `isrc`, `sub_genre`, `length_ms`) fetched from `/v4/catalog/tracks/{id}/`.
+- **detected tracks** — everything in `detected_tracks` (from the `detect` pipeline) without a Beatport match yet.
+- **synced tracks** — everything in `sync_tracks` (from `sync music/spotify pull`) without a Beatport match yet.
+
+Scope it to one source with `--detect` or `--sync` (mutually exclusive). Each source is fuzzy-matched against Beatport search and the full track metadata is pulled. Tracks with no result or a score below threshold are marked `not_found` / `fuzzy_miss` (on `detected_tracks.enrich_outcome` for detected, `sync_tracks.enrich_outcome` for synced) and skipped on future runs unless `--retry-misses` is passed.
+
+Each match writes one row to `enriched_tracks` carrying every Beatport-derived field on the same row: the basic search-result fields (`bpm`, `key`, `genre`, `release_date`, `beatport_id`, `beatport_link`, `artist`, `title`, `apple_music_url`) plus the catalog-detail extras (`mix_name`, `label`, `catalog_number`, `isrc`, `sub_genre`, `length_ms`) fetched from `/v4/catalog/tracks/{id}/`. Both sources land in the same `enriched_tracks` table — analysis and export don't care which path a row came from.
 
 Beatport-sourced data is fetched **only** here (and inline-extracted by `sync beatport` from the playlist response). `enrich analyse` does not call Beatport.
 
-`dj enrich metadata` enriches both detected and synced tracks by default; scope it with `--detect` or `--sync`.
-
 ```bash
-uv run dj_cli.py enrich metadata                      # enrich detected + synced tracks
+uv run dj_cli.py enrich metadata                      # enrich detected + synced tracks (default: both)
 uv run dj_cli.py enrich metadata --detect             # only detected tracks
-uv run dj_cli.py enrich metadata --detect --dry-run
-uv run dj_cli.py enrich metadata --detect --limit 50
-uv run dj_cli.py enrich metadata --detect --verbose            # print per-track Beatport detail
-uv run dj_cli.py enrich metadata --detect --threshold 0.8      # stricter match (default: 0.72)
-uv run dj_cli.py enrich metadata --detect --retry-misses       # retry previously missed tracks
+uv run dj_cli.py enrich metadata --sync               # only synced tracks
+uv run dj_cli.py enrich metadata --dry-run            # show what would be enriched, no DB writes
+uv run dj_cli.py enrich metadata --limit 50           # stop after N tracks per source
+uv run dj_cli.py enrich metadata --verbose            # print per-track Beatport detail
+uv run dj_cli.py enrich metadata --threshold 0.8      # stricter match (default: 0.72)
+uv run dj_cli.py enrich metadata --retry-misses       # retry previously missed tracks
 ```
 
 Log written to `~/Music/dj/logs/enrich/YYYY-MM-DD_<run_id>.log`. Every other command writes to `~/Music/dj/logs/<command>/YYYY-MM-DD_<HHMMSS>.log` automatically.
