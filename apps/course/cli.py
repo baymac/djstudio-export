@@ -11,10 +11,11 @@ from pathlib import Path
 from rich.console import Console
 
 from paths import COURSE_PID_FILE, LOGS_DIR
+from assets import locate_app_dir, ensure_app_runnable, running_from_checkout
 
 console = Console()
 
-_APP_DIR = Path(__file__).parent
+_APP_DIR = locate_app_dir("apps/course")
 _PID_FILE = COURSE_PID_FILE
 _URL_FILE = COURSE_PID_FILE.parent / "course_url.txt"
 _FALLBACK_URL = "https://course.localhost"
@@ -71,6 +72,11 @@ def run_start() -> None:
         return
 
     _PID_FILE.parent.mkdir(parents=True, exist_ok=True)
+
+    if not running_from_checkout():
+        _start_installed()
+        return
+
     _ensure_deps()
     _ensure_proxy()
 
@@ -81,9 +87,10 @@ def run_start() -> None:
     log_path = log_dir / f"{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}.log"
     log_fh = log_path.open("w")
 
+    app_dir = ensure_app_runnable("apps/course")
     proc = subprocess.Popen(
         ["npx", "portless", "course", "npm", "run", "dev"],
-        cwd=_APP_DIR,
+        cwd=app_dir,
         start_new_session=True,  # new session → pid == pgid, kill group on stop
         stdout=log_fh,
         stderr=log_fh,
@@ -106,6 +113,52 @@ def run_start() -> None:
     console.print(f"[green]Course viewer started[/green] → {url}")
     _hint_service_install(url)
     _open(url)
+
+
+def _start_installed() -> None:
+    """Installed mode: serve the pre-built dist/ with Python's HTTP server."""
+    import http.server
+    import socket
+    import threading
+
+    app_dir = ensure_app_runnable("apps/course")
+    dist_dir = app_dir / "dist"
+
+    # Pick a free port.
+    with socket.socket() as s:
+        s.bind(("127.0.0.1", 0))
+        port = s.getsockname()[1]
+
+    # SPA fallback handler — all non-asset paths serve index.html.
+    class _SPAHandler(http.server.SimpleHTTPRequestHandler):
+        def __init__(self, *a, **kw):
+            super().__init__(*a, directory=str(dist_dir), **kw)
+
+        def translate_path(self, path: str) -> str:
+            fspath = super().translate_path(path)
+            if not Path(fspath).exists():
+                return str(dist_dir / "index.html")
+            return fspath
+
+        def log_message(self, fmt, *args):
+            pass  # silence access log
+
+    httpd = http.server.HTTPServer(("127.0.0.1", port), _SPAHandler)
+    thread = threading.Thread(target=httpd.serve_forever, daemon=True)
+    thread.start()
+
+    _PID_FILE.write_text(str(os.getpid()))
+    url = f"http://localhost:{port}"
+    _URL_FILE.write_text(url)
+
+    console.print(f"[green]Course viewer started[/green] → {url}")
+    _open(url)
+    console.print("[dim]Press Ctrl-C or run[/dim] [bold]dj course stop[/bold] [dim]to quit.[/dim]")
+    try:
+        thread.join()
+    except KeyboardInterrupt:
+        httpd.shutdown()
+        run_stop()
 
 
 def _check_port_match(log_path: Path) -> bool:

@@ -59,6 +59,36 @@ APPLE_MUSIC_BACKUP_DIR = BACKUPS_DIR / "apple-music"
 REKORDBOX_BACKUP_DIR = BACKUPS_DIR / "rekordbox"
 
 
+def resolve_env_file() -> Path | None:
+    """Return the path to the .env file to load, or None if none found.
+
+    Search order (first match wins):
+      1. $DJ_ENV_FILE env var (explicit override)
+      2. ./.env (current working directory — checkout dev convenience)
+      3. ~/Music/dj/.env (installed default; secrets live next to the DB)
+      4. ~/.config/dj/.env (XDG-style fallback)
+
+    Both ``dj_cli.py`` (load at startup) and ``connections/beatport.py``
+    (token write-back) route through this so they always agree on which file
+    to read from and persist to.
+    """
+    import os
+
+    explicit = os.environ.get("DJ_ENV_FILE", "").strip()
+    if explicit:
+        return Path(explicit)
+
+    candidates = [
+        Path(".env"),
+        DJ_DIR / ".env",
+        Path.home() / ".config" / "dj" / ".env",
+    ]
+    for p in candidates:
+        if p.exists():
+            return p
+    return None
+
+
 def log_path(command: str, run_id: str | int) -> Path:
     """Return the log file path for one run of `command`. Creates the dir."""
     cmd_dir = LOGS_DIR / command

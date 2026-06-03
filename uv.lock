@@ -343,8 +343,7 @@ wheels = [
 ]
 
 [[package]]
-name = "dj-tools"
-version = "0.1.0"
+name = "dj"
 source = { editable = "." }
 dependencies = [
     { name = "browser-cookie3" },

@@ -38,8 +38,8 @@ console = Console()
 
 # ── Paths ─────────────────────────────────────────────────────────────────────
 
-REPO_ROOT = Path(__file__).resolve().parent.parent
-NODE_HELPER = REPO_ROOT / "enrich" / "dj_studio_sdk.js"
+from assets import resolve_data_file as _resolve_data_file
+NODE_HELPER = _resolve_data_file("enrich/dj_studio_sdk.js")
 
 # DJ Studio token decrypt
 _DJS_ENC_KEY = bytes.fromhex(

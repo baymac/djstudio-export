@@ -163,8 +163,9 @@ def refresh_via_session(session_cookie: str, *, verbose: bool = False) -> Option
 def _set_env_key(key: str, value: str) -> None:
     try:
         from dotenv import set_key
-        env_path = __import__("pathlib").Path(__file__).resolve().parent.parent / ".env"
-        if env_path.exists():
+        from paths import resolve_env_file
+        env_path = resolve_env_file()
+        if env_path and env_path.exists():
             set_key(str(env_path), key, value)
     except Exception:
         pass
@@ -222,9 +223,12 @@ def resolve_access_token(
     if not session_cookie:
         try:
             from dotenv import dotenv_values
-            session_cookie = (
-                dotenv_values(".env").get("BEATPORT_SESSION_TOKEN", "") or ""
-            ).strip()
+            from paths import resolve_env_file
+            _ef = resolve_env_file()
+            if _ef:
+                session_cookie = (
+                    dotenv_values(str(_ef)).get("BEATPORT_SESSION_TOKEN", "") or ""
+                ).strip()
         except Exception:
             pass
     if session_cookie:

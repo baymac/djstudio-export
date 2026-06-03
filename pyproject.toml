@@ -1,6 +1,6 @@
 [project]
-name = "dj-tools"
-version = "0.1.0"
+name = "dj"
+dynamic = ["version"]
 requires-python = ">=3.11,<3.13"
 dependencies = [
     "pyrekordbox",
@@ -33,8 +33,23 @@ dev = [
 requires = ["setuptools>=61"]
 build-backend = "setuptools.build_meta"
 
+[tool.setuptools.dynamic]
+version = {file = "VERSION"}
+
 [tool.setuptools]
-py-modules = ["dj_cli", "paths", "caffeinate"]
+py-modules = ["dj_cli", "paths", "caffeinate", "assets", "update", "doctor"]
 
 [tool.setuptools.packages.find]
 include = ["detect*", "sync*", "enrich*", "playlist*", "export*", "connections*", "djstudio*", "rekordbox*", "helpers*", "apps*", "vj*"]
+
+[tool.setuptools.package-data]
+# Read-only source files accessed by external tools (swiftc, node).
+"connections.bridge" = ["*.swift"]
+"enrich" = ["dj_studio_sdk.js"]
+# Extension source (read-only, no npm at runtime).
+"apps" = ["**/*.json", "**/*.js", "**/*.ts", "**/*.css", "**/*.html", "**/*.png", "**/*.svg"]
+# Pre-built frontend assets (built by CI before wheel build).
+"apps.course" = ["dist/**/*"]
+"vj.cats" = ["dist/**/*"]
+# VJ package.json for list_apps() discovery.
+"vj" = ["**/package.json"]
