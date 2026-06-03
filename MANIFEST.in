@@ -1,0 +1,24 @@
+# Explicit source distribution inclusions.
+# setuptools.package-data handles installed package data; this covers the sdist.
+
+include VERSION
+include README.md
+include CHANGELOG.md
+include LICENSE
+
+# Shipped data files read by external tools (swiftc, node).
+include connections/bridge/musickit_bridge.swift
+include enrich/dj_studio_sdk.js
+
+# Chrome extension source (read-only, no npm required).
+recursive-include apps manifest.json *.js *.ts *.css *.html *.png *.svg *.json
+
+# Pre-built frontend dist (built by CI before sdist/wheel; may be absent in a dev checkout).
+recursive-include apps/course/dist *
+recursive-include vj/cats/dist *
+
+# Exclude build artefacts, dev tooling, and secrets.
+global-exclude *.pyc *.pyo __pycache__ .DS_Store ._*
+recursive-exclude * node_modules
+recursive-exclude * *.tsbuildinfo
+exclude .env

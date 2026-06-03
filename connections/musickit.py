@@ -6,7 +6,8 @@ import json
 import subprocess
 from pathlib import Path
 
-_BRIDGE_SRC = Path(__file__).resolve().parent / "bridge" / "musickit_bridge.swift"
+from assets import resolve_data_file as _resolve_data_file
+_BRIDGE_SRC = _resolve_data_file("connections/bridge/musickit_bridge.swift")
 from paths import MUSICKIT_CACHE_DIR as _CACHE_DIR
 
 

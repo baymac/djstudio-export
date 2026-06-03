@@ -18,10 +18,11 @@ from pathlib import Path
 from rich.console import Console
 
 from paths import LOGS_DIR, STATE_DIR
+from assets import locate_app_dir, ensure_app_runnable, running_from_checkout
 
 console = Console()
 
-_VJ_ROOT = Path(__file__).parent
+_VJ_ROOT = locate_app_dir("vj")
 
 
 def _state_files(name: str) -> tuple[Path, Path]:
@@ -130,7 +131,6 @@ def _open(url: str) -> None:
 
 
 def run_start(name: str) -> None:
-    app_dir = _app_dir(name)
     pid_file, url_file = _state_files(name)
 
     pid = _read_pid(pid_file)
@@ -141,6 +141,12 @@ def run_start(name: str) -> None:
         return
 
     pid_file.parent.mkdir(parents=True, exist_ok=True)
+
+    if not running_from_checkout():
+        _start_installed(name, pid_file, url_file)
+        return
+
+    app_dir = _app_dir(name)
     _ensure_deps(app_dir)
     _ensure_proxy(app_dir)
 
@@ -166,6 +172,51 @@ def run_start(name: str) -> None:
     console.print(f"[green]{name} started[/green] → {url}")
     _hint_service_install(url)
     _open(url)
+
+
+def _start_installed(name: str, pid_file: Path, url_file: Path) -> None:
+    """Installed mode: serve the pre-built dist/ with Python's HTTP server."""
+    import http.server
+    import socket
+    import threading
+
+    app_dir = ensure_app_runnable(f"vj/{name}")
+    dist_dir = app_dir / "dist"
+
+    with socket.socket() as s:
+        s.bind(("127.0.0.1", 0))
+        port = s.getsockname()[1]
+
+    class _SPAHandler(http.server.SimpleHTTPRequestHandler):
+        def __init__(self, *a, **kw):
+            super().__init__(*a, directory=str(dist_dir), **kw)
+
+        def translate_path(self, path: str) -> str:
+            from pathlib import Path as _P
+            fspath = super().translate_path(path)
+            if not _P(fspath).exists():
+                return str(dist_dir / "index.html")
+            return fspath
+
+        def log_message(self, fmt, *args):
+            pass
+
+    httpd = http.server.HTTPServer(("127.0.0.1", port), _SPAHandler)
+    thread = threading.Thread(target=httpd.serve_forever, daemon=True)
+    thread.start()
+
+    pid_file.write_text(str(os.getpid()))
+    url = f"http://localhost:{port}"
+    url_file.write_text(url)
+
+    console.print(f"[green]{name} started[/green] → {url}")
+    _open(url)
+    console.print("[dim]Press Ctrl-C or run[/dim] [bold]dj vj {name} stop[/bold] [dim]to quit.[/dim]")
+    try:
+        thread.join()
+    except KeyboardInterrupt:
+        httpd.shutdown()
+        run_stop(name)
 
 
 def run_stop(name: str) -> None:

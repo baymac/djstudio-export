@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.6.1] - 2026-06-03
+
+### Changed
+- **Docs:** Restructured the README around what each command's user needs. Every section now follows the same shape — what it does, how to run it, the **Setup** you do once (credentials, prerequisites, app-must-be-closed constraints), and **Good to know** (the tradeoffs and caveats: SoundCloud/Bandcamp fidelity, Apple Music best-effort re-add, `enrich analyse` timing/memory and what it doesn't produce, `--threshold` tuning, etc.). Engine internals that users don't need (token-refresh mechanics, byte-verification, internal function/file names) were dropped or demoted, while the config and tradeoffs that were buried in them are now surfaced explicitly. The DB schema and command tree are kept in full (you need them for `export --query`).
+- **Docs:** Reframed the README enrichment section around `dj enrich metadata` as a single entrypoint that enriches **both** detected (`detected_tracks`) and synced (`sync_tracks`) sources by default, scoped with `--detect`/`--sync`. Clarified that both sources land in the same `enriched_tracks` table and cleaned up the command examples to drop the stale `--detect`-on-every-line framing.
+
 ## [0.1.6.0] - 2026-06-03
 
 ### Added

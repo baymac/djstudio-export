@@ -17,15 +17,19 @@ from pathlib import Path
 from rich.console import Console
 
 from paths import DJ_DIR
+from assets import locate_app_dir
 
 console = Console()
 
-_APPS_ROOT = Path(__file__).parent.parent
+_APPS_ROOT = locate_app_dir("apps")
 _OUT_DIR = DJ_DIR / "extensions"
 
 
 def _resolve_source(name: str) -> Path:
     """Find the extension/ source folder for `name`. Raises SystemExit on miss."""
+    if ".." in name or "/" in name or "\\" in name:
+        console.print(f"[red]Invalid extension name:[/red] {name!r}")
+        raise SystemExit(2)
     candidates = [
         _APPS_ROOT / f"{name}-extension" / "extension",
         _APPS_ROOT / name / "extension",

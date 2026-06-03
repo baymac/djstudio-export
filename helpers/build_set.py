@@ -16,15 +16,18 @@ drive, so "where are we in the night" uses more than one signal:
 Each archetype carries DEFAULT GENRES + a BPM/energy window + a multi-phase curve.
 The default genres are a starting point the caller overrides with --genres.
 
-Usage:
-    uv run helpers/build_set.py --list-archetypes
-    uv run helpers/build_set.py --list-genres [--archetype peak_time]
-    uv run helpers/build_set.py --archetype club_night --duration 120   # preview only
-    uv run helpers/build_set.py --archetype party --name "Bday Bash" \
+Usage (prefer the CLI entry point):
+    dj set build --list-archetypes
+    dj set build --list-genres [--archetype peak_time]
+    dj set build --archetype club_night --duration 120   # preview only
+    dj set build --archetype party --name "Bday Bash" \
         --duration 90 --count 24 --genres "Tech House,Bass House" \
         --date-blend '[{"label":"this year","from":"2026-01-01","ratio":0.9},
                        {"label":"older","to":"2025-12-31","ratio":0.1}]' \
         --save                                     # -> prints "set_id=<n>"
+
+    # Or run directly (same flags):
+    uv run helpers/build_set.py --list-archetypes
 
 The date blend is any number of release-date ranges, each with a ratio (the set
 is filled proportionally). Omit --date-blend for the default 75% ≤1yr / 12.5%
@@ -752,6 +755,113 @@ def _list_genres(conn: sqlite3.Connection, arch: Optional[Archetype]) -> None:
         print(f"  {mark} {genre:35} {c:>5}")
 
 
+def run(args, ap=None) -> None:
+    """Execute the set build from a pre-parsed args namespace.
+
+    ap is an ArgumentParser (or subparser) used to format error messages.
+    When called from set/cli.py, pass the build subparser so error output
+    shows `dj set build: error: ...`.  When ap is None errors go to stderr.
+    """
+    def _err(msg):
+        if ap is not None:
+            ap.error(msg)
+        else:
+            print(f"error: {msg}", file=sys.stderr)
+            sys.exit(2)
+
+    if args.list_archetypes:
+        _list_archetypes()
+        return
+
+    db.migrate()
+    conn = sqlite3.connect(DB_PATH)
+    try:
+        arch_opt = ARCHETYPES.get(args.archetype) if args.archetype else None
+
+        if args.list_genres:
+            _list_genres(conn, arch_opt)
+            return
+
+        if not args.archetype:
+            _err("--archetype is required (see --list-archetypes)")
+        if arch_opt is None:
+            _err(f"unknown archetype {args.archetype!r} (see --list-archetypes)")
+        arch = arch_opt
+        if not args.duration:
+            _err("--duration (minutes) is required")
+
+        count, warn = resolve_count(args.duration, args.count)
+        if warn:
+            print(f"[count] {warn}", file=sys.stderr)
+
+        genres = (tuple(g.strip() for g in args.genres.split(",") if g.strip())
+                  if args.genres else arch.genres)
+        try:
+            buckets = parse_date_blend(args.date_blend)
+        except (ValueError, json.JSONDecodeError, KeyError) as e:
+            _err(f"bad --date-blend: {e}")
+
+        pool = load_pool(conn, genres, arch.bpm_lo, arch.bpm_hi,
+                         arch.nrg_lo, arch.nrg_hi)
+        if not pool:
+            print("No candidates matched. Widen genres or the BPM/energy window.",
+                  file=sys.stderr)
+            sys.exit(1)
+        pool = assign_date_buckets(pool, buckets)
+        if not pool:
+            print("No candidates fall in any date bucket. Widen the date blend.",
+                  file=sys.stderr)
+            sys.exit(1)
+        excluded_used = 0
+        if args.exclude_used:
+            used = db.used_beatport_ids(args.name, arch.key)
+            before = len(pool)
+            pool = [t for t in pool if t.beatport_id not in used]
+            excluded_used = before - len(pool)
+            if not pool:
+                print("Every in-window candidate is already used in a past set. "
+                      "Drop --exclude-used or widen genres/dates.", file=sys.stderr)
+                sys.exit(1)
+        method = args.method or arch.method
+        diversity = args.diversity if args.diversity is not None else arch.diversity
+        if not 0.0 <= diversity <= 1.0:
+            _err("--diversity must be between 0.0 and 1.0")
+        assign_intensity(pool, _stem_percentiles(pool))
+        seq = sequence(arch, pool, count, buckets, seed_id=args.seed_id,
+                       method=method, diversity=diversity)
+
+        if args.json:
+            print(json.dumps(set_payload(arch, seq, buckets, method=method,
+                                         diversity=diversity), indent=2))
+        else:
+            print_set(arch, seq, buckets, method=method, diversity=diversity)
+            used_note = (f" ({excluded_used} excluded as already-used)"
+                         if args.exclude_used else "")
+            print(f"\n  pool: {len(pool)} in-window candidates{used_note} -> "
+                  f"{len(seq)} selected")
+
+        if args.save:
+            if not args.name:
+                _err("--name is required with --save")
+            params = {
+                "mood": args.mood, "duration_min": args.duration,
+                "count": count, "genres": list(genres),
+                "method": method, "diversity": diversity,
+                "exclude_used": args.exclude_used,
+                "date_blend": [{"label": b.label, "from": b.frm, "to": b.to,
+                                "ratio": b.ratio} for b in buckets],
+                "curve": [{"name": p.name, "t": p.t, "intensity": p.energy}
+                          for p in arch.curve],
+            }
+            set_id = db.record_built_set(args.name, arch.key,
+                                         [t.beatport_id for t in seq], params)
+            print(f"set_id={set_id}")
+        elif not args.json:
+            print("  (preview only — add --save --name \"...\" to store)")
+    finally:
+        conn.close()
+
+
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -788,99 +898,7 @@ def main() -> None:
     ap.add_argument("--save", action="store_true", help="persist to dj_sets, print set_id")
     ap.add_argument("--list-archetypes", action="store_true")
     ap.add_argument("--list-genres", action="store_true")
-    args = ap.parse_args()
-
-    if args.list_archetypes:
-        _list_archetypes()
-        return
-
-    db.migrate()
-    conn = sqlite3.connect(DB_PATH)
-    try:
-        arch_opt = ARCHETYPES.get(args.archetype) if args.archetype else None
-
-        if args.list_genres:
-            _list_genres(conn, arch_opt)
-            return
-
-        if not args.archetype:
-            ap.error("--archetype is required (see --list-archetypes)")
-        if arch_opt is None:
-            ap.error(f"unknown archetype {args.archetype!r} (see --list-archetypes)")
-        arch = arch_opt
-        if not args.duration:
-            ap.error("--duration (minutes) is required")
-
-        count, warn = resolve_count(args.duration, args.count)
-        if warn:
-            print(f"[count] {warn}", file=sys.stderr)
-
-        genres = (tuple(g.strip() for g in args.genres.split(",") if g.strip())
-                  if args.genres else arch.genres)
-        try:
-            buckets = parse_date_blend(args.date_blend)
-        except (ValueError, json.JSONDecodeError, KeyError) as e:
-            ap.error(f"bad --date-blend: {e}")
-
-        pool = load_pool(conn, genres, arch.bpm_lo, arch.bpm_hi,
-                         arch.nrg_lo, arch.nrg_hi)
-        if not pool:
-            print("No candidates matched. Widen genres or the BPM/energy window.",
-                  file=sys.stderr)
-            sys.exit(1)
-        pool = assign_date_buckets(pool, buckets)
-        if not pool:
-            print("No candidates fall in any date bucket. Widen the date blend.",
-                  file=sys.stderr)
-            sys.exit(1)
-        excluded_used = 0
-        if args.exclude_used:
-            used = db.used_beatport_ids(args.name, arch.key)
-            before = len(pool)
-            pool = [t for t in pool if t.beatport_id not in used]
-            excluded_used = before - len(pool)
-            if not pool:
-                print("Every in-window candidate is already used in a past set. "
-                      "Drop --exclude-used or widen genres/dates.", file=sys.stderr)
-                sys.exit(1)
-        method = args.method or arch.method
-        diversity = args.diversity if args.diversity is not None else arch.diversity
-        if not 0.0 <= diversity <= 1.0:
-            ap.error("--diversity must be between 0.0 and 1.0")
-        assign_intensity(pool, _stem_percentiles(pool))
-        seq = sequence(arch, pool, count, buckets, seed_id=args.seed_id,
-                       method=method, diversity=diversity)
-
-        if args.json:
-            print(json.dumps(set_payload(arch, seq, buckets, method=method,
-                                         diversity=diversity), indent=2))
-        else:
-            print_set(arch, seq, buckets, method=method, diversity=diversity)
-            used_note = (f" ({excluded_used} excluded as already-used)"
-                         if args.exclude_used else "")
-            print(f"\n  pool: {len(pool)} in-window candidates{used_note} -> "
-                  f"{len(seq)} selected")
-
-        if args.save:
-            if not args.name:
-                ap.error("--name is required with --save")
-            params = {
-                "mood": args.mood, "duration_min": args.duration,
-                "count": count, "genres": list(genres),
-                "method": method, "diversity": diversity,
-                "exclude_used": args.exclude_used,
-                "date_blend": [{"label": b.label, "from": b.frm, "to": b.to,
-                                "ratio": b.ratio} for b in buckets],
-                "curve": [{"name": p.name, "t": p.t, "intensity": p.energy}
-                          for p in arch.curve],
-            }
-            set_id = db.record_built_set(args.name, arch.key,
-                                         [t.beatport_id for t in seq], params)
-            print(f"set_id={set_id}")
-        elif not args.json:
-            print("  (preview only — add --save --name \"...\" to store)")
-    finally:
-        conn.close()
+    run(ap.parse_args(), ap)
 
 
 if __name__ == "__main__":
