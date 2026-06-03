@@ -4,6 +4,7 @@
   dj detect ...          Detect tracks from Instagram/radio/Mixcloud/YouTube/Podbean
   dj sync ...            Capture Apple Music/Spotify/Beatport → enriched library
   dj enrich ...          Enrich detected + synced tracks → Beatport metadata + DJ Studio analysis
+  dj set build ...       Build an energy-sequenced DJ set from the analysed library
   dj export ...          Push a stored set, or a SQL-curated subset, to Beatport / rekordbox
   dj version             Show the installed version
   dj update              Update dj to the latest release (or pull if in checkout)
@@ -44,6 +45,7 @@ from detect.cli import add_detect_subparser, dispatch as dispatch_detect
 from sync.cli import add_sync_subparser, dispatch as dispatch_sync
 from enrich.cli import add_enrich_subparser, dispatch as dispatch_enrich
 from export.cli import add_export_subparser, dispatch as dispatch_export
+from set.cli import add_set_subparser, dispatch as dispatch_set
 from apps.course.cli import run_start as course_start, run_stop as course_stop
 from apps.extension.cli import pack as extension_pack, list_extensions
 from vj.cli import run_start as vj_start, run_stop as vj_stop, list_apps as vj_list_apps
@@ -83,6 +85,10 @@ Examples:
   dj enrich metadata --sync       # only synced tracks
   dj enrich analyse               # DJ Studio SDK analysis → enriched_tracks_analysis
 
+  dj set build --list-archetypes
+  dj set build --archetype club_night --duration 120
+  dj set build --archetype party --name "Bday" --duration 90 --count 24 --save
+
   dj export set 42 --to bp_chart
   dj export beatport --query "SELECT beatport_id FROM enriched_tracks WHERE genre='Tech House'" --name "..."
   dj export rekordbox --query "..." --name "..."
@@ -98,6 +104,7 @@ Examples:
     detect_p = add_detect_subparser(sub)
     sync_p = add_sync_subparser(sub)
     enrich_p = add_enrich_subparser(sub)
+    set_p = add_set_subparser(sub)
     export_p = add_export_subparser(sub)
 
     course_p = sub.add_parser("course", help="Start/stop the offline course viewer")
@@ -146,11 +153,11 @@ Examples:
     # ── doctor ─────────────────────────────────────────────────────────────
     sub.add_parser("doctor", help="Check runtime dependencies and .env configuration")
 
-    return parser, detect_p, sync_p, enrich_p, export_p, course_p, vj_p, ext_p
+    return parser, detect_p, sync_p, enrich_p, set_p, export_p, course_p, vj_p, ext_p
 
 
 def main() -> None:
-    parser, detect_p, sync_p, enrich_p, export_p, course_p, vj_p, ext_p = _build_parser()
+    parser, detect_p, sync_p, enrich_p, set_p, export_p, course_p, vj_p, ext_p = _build_parser()
     args = parser.parse_args()
 
     if args.command == "detect":
@@ -159,6 +166,8 @@ def main() -> None:
         dispatch_sync(args, sync_p)
     elif args.command == "enrich":
         dispatch_enrich(args, enrich_p)
+    elif args.command == "set":
+        dispatch_set(args, set_p)
     elif args.command == "export":
         dispatch_export(args, export_p)
     elif args.command == "course":

@@ -139,6 +139,13 @@ dj
 │   └── analyse        [--ids ID,…] [--limit N] [--verbose] [--force] [--retry-failed]
 │                                                       Drive DJ Studio's SDK → enriched_tracks_analysis
 │
+├── set                                                 Build and manage energy-sequenced DJ sets
+│   └── build  [--archetype KEY] [--duration MIN] [--name NAME] [--mood TEXT]
+│              [--count N] [--genres "A,B"] [--date-blend JSON]
+│              [--method {fuzzy,mood}] [--diversity 0..1] [--exclude-used]
+│              [--seed-id ID] [--json] [--save]
+│              [--list-archetypes] [--list-genres]
+│
 ├── export                                              Push a stored set or SQL-curated subset to a destination
 │   ├── set <id> --to {bp_chart|bp_playlist|rekordbox} [--name NAME] [--description TEXT] [--dry-run]
 │   ├── beatport  --query SQL --name NAME [--dry-run]   Ad-hoc SQL (must SELECT beatport_id) → Beatport playlist
@@ -457,21 +464,21 @@ To inspect the analysis, query `~/Music/dj/dj.db` directly (see [Database schema
 
 ---
 
-## Building a set — `dj-set-builder` skill + `helpers/build_set.py`
+## Building a set — `dj set build`
 
 **What it does:** curates a set as an **intensity curve over time**, not a flat genre filter. You pick an *archetype* (a named energy shape) and the engine walks your analysed library, choosing each next track so the set follows that shape while staying mixable (harmonic + tempo + texture) and varied. The result is stored and addressed by a **set id**. Building doesn't export — that's the separate `dj export set <id>` step.
 
-The easiest way in is the **`dj-set-builder` skill**, which asks for name / mood / archetype / duration / count / genres / release-date mix and runs the script for you. You can also drive the script directly:
+The easiest way in is the **`dj-set-builder` skill** (in Claude Code), which interviews you interactively and runs the command for you. You can also drive `dj set build` directly:
 
 ```bash
-uv run helpers/build_set.py --list-archetypes              # catalogue + each one's default genres + curve
-uv run helpers/build_set.py --list-genres --archetype party   # library genres + live track counts (* = default)
+dj set build --list-archetypes                 # catalogue + each one's default genres + curve
+dj set build --list-genres --archetype party   # library genres + live track counts (* = default)
 
 # Preview (no DB write):
-uv run helpers/build_set.py --archetype club_night --duration 120
+dj set build --archetype club_night --duration 120
 
 # Build + store (prints set_id=<n>):
-uv run helpers/build_set.py --archetype party --name "Maya's Bday" --mood "friends birthday" \
+dj set build --archetype party --name "Maya's Bday" --mood "friends birthday" \
   --duration 90 --count 24 --genres "House,Tech House,Bass House" \
   --date-blend '[{"label":"this year","from":"2026-01-01","ratio":0.9},{"label":"older","to":"2025-12-31","ratio":0.1}]' \
   --save
@@ -479,7 +486,7 @@ uv run helpers/build_set.py --archetype party --name "Maya's Bday" --mood "frien
 
 **Setup:** an analysed library — the builder reads the energy/key/stem data written by `enrich analyse`. Tracks without analysis can't be sequenced.
 
-**Archetypes:** `warmup`, `peak_time`, `late_night`, `closing`, `club_night`, `sunset`, `party`, `dark`, `festival`, `dinner`, `morning_coffee`. Each carries default genres, a BPM/energy window, and a multi-phase, non-monotonic curve — e.g. `club_night` rises, bumps, dips deliberately, climbs to a plateau, dips again, then spikes to a high finish.
+**Archetypes:** `warmup`, `peak_time`, `late_night`, `closing`, `club_night`, `sunset`, `party`, `dark`, `festival`, `dinner`, `morning_coffee`, `radio_mix`. Each carries default genres, a BPM/energy window, and a multi-phase, non-monotonic curve — e.g. `club_night` rises, bumps, dips deliberately, climbs to a plateau, dips again, then spikes to a high finish.
 
 **Flags:**
 

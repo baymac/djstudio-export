@@ -97,9 +97,9 @@ uv run dj_cli.py enrich analyse                                                 
 uv run dj_cli.py enrich analyse --ids 12345,67890 --force --verbose                     #   re-process specific tracks (debugging)
 
 # Build an energy-sequenced set (the dj-set-builder skill drives this interactively)
-uv run helpers/build_set.py --list-archetypes                                           # catalogue + default genres
-uv run helpers/build_set.py --archetype club_night --duration 120                       # preview (no write)
-uv run helpers/build_set.py --archetype party --name "Bday" --duration 90 --count 24 \
+dj set build --list-archetypes                                                          # catalogue + default genres
+dj set build --archetype club_night --duration 120                                      # preview (no write)
+dj set build --archetype party --name "Bday" --duration 90 --count 24 \
     --genres "House,Tech House" --date-blend '[{"from":"2026-01-01","ratio":0.9},{"to":"2025-12-31","ratio":0.1}]' \
     --save                                                                              # -> set_id=<n>
 
@@ -107,7 +107,7 @@ uv run helpers/build_set.py --archetype party --name "Bday" --duration 90 --coun
 uv run dj_cli.py export beatport  --query "SELECT beatport_id FROM enriched_tracks WHERE ..." --name "..."
 uv run dj_cli.py export rekordbox --query "..." --name "..."
 
-# Stored set → destination (set id comes from the dj-set-builder skill / helpers/build_set.py)
+# Stored set → destination (set id comes from the dj-set-builder skill / dj set build)
 uv run dj_cli.py export set <id> --to bp_chart                       # publishable Beatport chart (draft)
 uv run dj_cli.py export set <id> --to bp_playlist --name "Peak Time" # Beatport playlist
 uv run dj_cli.py export set <id> --to rekordbox --dry-run            # rekordbox playlist (quit rekordbox first)
@@ -161,14 +161,14 @@ uv run helpers/cleanup_playlist.py "Playlist Name" --dry-run
 - **Broken courses don't black-hole the app** — vite's dev server returns `200 + index.html` (SPA fallback) for missing files in `publicDir`, so a broken symlink (e.g. unmounted external drive at `~/Music/dj/dj-academy → /Volumes/My Passport/…`) makes `JSON.parse(lessons.json)` throw "Unexpected token '<'". `lessonsStore.loadLessons` checks `Content-Type` and treats non-JSON 200s as missing; `main.tsx` boot walks `courses.json` in order and skips courses that fail to load, so one missing drive doesn't crash the viewer.
 - **Large courses live on the external drive** — both `dj-academy` and `producer-academy` are symlinks in `~/Music/dj/` pointing at `/Volumes/My Passport/DJ/<course>/`. Vite follows symlinks transparently; nothing in the app knows the difference. Mount the drive with `diskutil mount /dev/disk4s1` (or whatever `diskutil list external` shows for "My Passport") before starting the course viewer. On exFAT, filenames round-trip as NFD instead of APFS's NFC — `os.path.exists()` and vite's static serve both resolve NFC paths transparently, so lessons.json stored under NFC works either way. Caveat: rsync from APFS leaves AppleDouble `._*` sidecars all over the destination — harmless, just visual noise in `find` output.
 
-### Set builder (`helpers/build_set.py` + `dj-set-builder` skill)
+### Set builder (`dj set build` + `dj-set-builder` skill)
 
-- **Skill is the interactive layer; the script is a deterministic engine** — the `dj-set-builder` skill asks the user (name → mood → archetype → genres → duration → count → date), resolves answers to flags, then shells `helpers/build_set.py`. The script never prompts; same flags → same set. This mirrors the course/vj/extension pattern (markdown skill drives a flag CLI). Build is **decoupled from export**: `build_set.py` writes to `dj_sets`/`dj_set_tracks` and prints `set_id=<n>`; nothing pushes anywhere until `dj export set <id>` runs.
+- **Skill is the interactive layer; the CLI is a deterministic engine** — the `dj-set-builder` skill asks the user (name → mood → archetype → genres → duration → count → date), resolves answers to flags, then shells `dj set build`. The command never prompts; same flags → same set. This mirrors the course/vj/extension pattern (markdown skill drives a flag CLI). Build is **decoupled from export**: `dj set build` writes to `dj_sets`/`dj_set_tracks` and prints `set_id=<n>`; nothing pushes anywhere until `dj export set <id>` runs.
 - **A set is an intensity curve, not a genre bucket** — each archetype (`ARCHETYPES` dict: `warmup, peak_time, late_night, closing, club_night, sunset, party, dark, festival, dinner, morning_coffee`) carries default genres + a BPM/energy window + a **multi-phase, non-monotonic** `Phase` curve (control points at `t∈[0,1]` with target intensity 1–10 + per-stem emphasis). `club_night` is the canonical shape: rise → bump → deliberate dip → S-climb → plateau → dip → higher plateau → final spike. To reshape, edit the `Phase` points — never hand-tune per-track energies. Default genres are overridable with `--genres` (the skill suggests include/exclude but the user's choice is final).
 - **Composite intensity drives sequencing** — the curve targets `intensity = 10·(0.60·norm(mik_nrg) + 0.25·pct(bpm) + 0.15·drive)`, where `drive = mean(drums_pct, bass_pct)` and all `*_pct` are percentile ranks **within the candidate pool** (so "high energy for this set" is pool-relative, not absolute). Weights are constants (`W_NRG/W_BPM/W_DRIVE`). The greedy walk scores each next track by intensity-vs-curve + BPM smoothness + stem-emphasis match + Camelot-harmonic + vocal-clash + artist/label spacing; hard caps: max 2 tracks/artist, same-artist+title dedup, and the date-blend quotas below.
 - **Date control is a proportional blend, not a single window** — `--date-blend` is a JSON list of `{label, from, to, ratio}` buckets; the set is filled so each bucket gets ~its ratio of the tracks (largest-remainder rounding, capped to pool supply, shortfall refilled into buckets with spare). One window is a single 100% bucket. Omitting `--date-blend` applies the default **75% ≤1yr / 12.5% 1–2yr / 12.5% older** mix. The skill converts free text ("may 2026 50%, jan 30%, feb 20%" / "last 2 years 80%, 2010-2020 20%") into this JSON; first matching bucket (list order) claims a track, so order narrowest-first on overlap.
 - **Track-count bounds from duration** — `--count` is clamped to `[duration//5, duration//2]` (a track plays ~2–5 min); default `round(duration/3.5)`. `--list-archetypes` / `--list-genres` (with live pool counts) back the skill's suggestion step; `--json`/preview show the built set before `--save` persists it.
-- **Storage: `record_built_set(name, archetype, ids, params)`** — `type` = the archetype key, so the same name can exist per archetype and **rebuilding the same name+archetype replaces it**. Build provenance (mood, duration, count, genres, date_blend, curve) is JSON in `dj_sets.params_json`, so a set is self-describing. Query by id with `db.get_set(id)` / `db.tracks_in_set_id(id)`; full edit ops (add/remove/move/reorder/rename/delete) live in `detect/db.py`.
+- **Storage: `record_built_set(name, archetype, ids, params)`** — `type` = the archetype key, so the same name can exist per archetype and **rebuilding the same name+archetype replaces it**. Build provenance (mood, duration, count, genres, date_blend, curve) is JSON in `dj_sets.params_json`, so a set is self-describing. Query by id with `db.get_set(id)` / `db.tracks_in_set_id(id)`; full edit ops (add/remove/move/reorder/rename/delete) live in `detect/db.py`. The engine lives in `helpers/build_set.py` (imported by `set/cli.py`); the CLI entry is `dj set build`.
 
 ### export (stored sets + SQL → destination)
 

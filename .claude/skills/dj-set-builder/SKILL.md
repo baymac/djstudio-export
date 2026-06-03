@@ -6,7 +6,7 @@ description: >-
   when the user asks to "build a set", "make a set for <occasion/mood>", "warm-up
   / peak-time / closing / club-night / party / sunset set", "sequence a set",
   "energy arc / rotate the dance floor", or to store/update a curated set. The
-  engine is helpers/build_set.py; storage + edits live in detect/db.py. Export to
+  engine is `dj set build`; storage + edits live in detect/db.py. Export to
   a Beatport chart/playlist or rekordbox is a SEPARATE tool, not this skill.
 ---
 
@@ -19,16 +19,26 @@ staying mixable (harmonic + tempo + texture + variety) and well-blended (familia
 **id** the user can query and edit. This skill **does not export** — that's
 `dj export set <id> --to ...` (a separate CLI).
 
-You are the interactive layer. The engine (`helpers/build_set.py`) is a
-deterministic, flag-driven script. Gather preferences by asking, resolve them to
+You are the interactive layer. The engine (`dj set build`) is a
+deterministic, flag-driven command. Gather preferences by asking, resolve them to
 flags, **preview**, then **save**.
 
-## The interview (ask in this order; one topic at a time)
+> **Which command to run:** Use `dj set build` when `dj` is installed. When
+> working inside this repo without a global `dj` install, use
+> `uv run dj_cli.py set build` as an exact equivalent.
 
-1. **Name** — the set name. (May be given as the skill argument.)
+## The interview — extract first, ask only for what's missing
+
+**Before asking anything**, parse the user's request for info already given:
+name, mood/occasion, duration, genres, date preference. Only ask about fields
+that are genuinely missing. Never ask for something the user already stated.
+
+Ask **one topic at a time**, in this order:
+
+1. **Name** — the set name. (May be given as the skill argument or in the request.)
 2. **Mood / setting** — free text: "friends' birthday party", "halloween opening",
    "club closing", "sunday brunch", "rooftop sunset". Map it to the best-fit
-   **archetype** (run `uv run helpers/build_set.py --list-archetypes`). Show the
+   **archetype** (run `dj set build --list-archetypes`). Show the
    user the archetype you picked, its curve, and 1–2 alternatives; let them
    confirm or override. Archetype keys:
    `warmup, peak_time, late_night, closing, club_night, sunset, party, dark,
@@ -42,7 +52,7 @@ flags, **preview**, then **save**.
    engine warns if you pass something outside. If they have no preference, omit
    `--count` (defaults to ~duration/3.5).
 5. **Genres** — every archetype has **default genres**. Show them, plus the live
-   library counts (`--list-genres --archetype <key>`, `*` marks defaults). Suggest
+   library counts (`dj set build --list-genres --archetype <key>`, `*` marks defaults). Suggest
    genres to include or exclude for their mood, but **the user's choice is final** —
    pass exactly what they approve via `--genres "A,B,C"`. If they're happy with the
    defaults, omit `--genres`.
@@ -50,7 +60,7 @@ flags, **preview**, then **save**.
    each with a ratio (the set is filled proportionally). Convert their answer to
    ISO ranges and pass `--date-blend '<json list>'`, where each bucket is
    `{"label","from","to","ratio"}` (`from`/`to` optional/open; ratios are
-   renormalised). Today is 2026-06-02, so "last year" = from `2025-06-02`.
+   renormalised). Today is 2026-06-04, so "last year" = from `2025-06-04`.
    - "May 2026 50%, Jan 2026 30%, Feb 2026 20%" →
      `[{"label":"May 2026","from":"2026-05-01","to":"2026-05-31","ratio":0.5},
        {"label":"Jan 2026","from":"2026-01-01","to":"2026-01-31","ratio":0.3},
@@ -58,7 +68,7 @@ flags, **preview**, then **save**.
    - "this year 90%, older 10%" →
      `[{"from":"2026-01-01","ratio":0.9},{"to":"2025-12-31","ratio":0.1}]`
    - "last 2 years 80%, 2010-2020 20%" →
-     `[{"from":"2024-06-02","ratio":0.8},
+     `[{"from":"2024-06-04","ratio":0.8},
        {"from":"2010-01-01","to":"2020-12-31","ratio":0.2}]`
    - "just May 2026" → a single 100% bucket
      `[{"from":"2026-05-01","to":"2026-05-31","ratio":1}]`.
@@ -92,25 +102,36 @@ flags, **preview**, then **save**.
 
 ## Preview, then save
 
-Run a **preview first** (no `--save`) and show the user the sequence + the
-intensity sparkline + recency tags + the candidate-pool size:
+**Always run a preview first** (no `--save`). This is non-negotiable — never
+call `--save` without the user having seen and approved the preview.
 
 ```bash
-uv run helpers/build_set.py --archetype party --duration 90 --count 24 \
+dj set build --archetype party --duration 90 --count 24 \
     --genres "House,Tech House,Bass House"          # preview
 ```
 
-If they want changes (different archetype, genres, count, dates), re-run the
-preview with the tweaked flags. When they approve, **save** (add `--name` +
-`--save`); the engine prints `set_id=<n>`:
+**If the candidate pool is smaller than the requested count**: tell the user the
+actual pool size and offer options (widen genres, open the date window, reduce
+count, or drop `--exclude-used`). Don't silently produce a shorter set.
+
+Show the user the **sequence table** (track #, artist, title, BPM, key, intensity,
+recency tag), the **intensity sparkline**, and the **candidate-pool size**. When
+they approve, add `--name` + `--save` + `--mood "<free text>"`:
 
 ```bash
-uv run helpers/build_set.py --archetype party --name "Maya's Bday" --mood "friends birthday" \
+dj set build --archetype party --name "Maya's Bday" --mood "friends birthday" \
     --duration 90 --count 24 --genres "House,Tech House,Bass House" --save
 ```
 
-Report the **set id** and that they can query it or export it separately
-(`dj export set <id> --to bp_chart|bp_playlist|rekordbox`).
+**After saving, always report both of these on the same message:**
+
+```
+Set saved → set_id=<n>
+Export: dj export set <n> --to bp_chart | bp_playlist | rekordbox
+```
+
+If they want changes (different archetype, genres, count, dates), re-run the
+preview with the tweaked flags before saving.
 
 ## How the engine works (for explaining / tuning)
 
@@ -133,7 +154,7 @@ again, then spikes to a high finish. The walk interpolates the curve per step
 (`_curve_at`) so the greedy target is always smooth. Stem emphasis pulls texture
 into the arc: warm-ups lean melodic/vocal, peaks lean drum+bass, rotate-dips pull
 a vocal breather. To reshape a night, edit the `Phase` points in
-`ARCHETYPES[...]` — don't hand-tune per-track energies.
+`ARCHETYPES[...]` in `helpers/build_set.py` — don't hand-tune per-track energies.
 
 ### Mixing guidelines (scored greedily; lower = better next track)
 
@@ -198,14 +219,14 @@ track", "what sets is this in", or "rename the set" → use these directly.
 ## Exporting (NOT this skill)
 
 Building is decoupled from any destination. To push a stored set out, use the
-separate command (planned): `dj export set <id> --to bp_chart | bp_playlist |
-rekordbox`. Don't push to Beatport/rekordbox from this skill.
+separate command: `dj export set <id> --to bp_chart | bp_playlist | rekordbox`.
+Don't push to Beatport/rekordbox from this skill.
 
 ## Add or tune archetypes
 
-- **New archetype** — add an entry to `ARCHETYPES` in `build_set.py` with default
+- **New archetype** — add an entry to `ARCHETYPES` in `helpers/build_set.py` with default
   genres, a BPM/energy window, and a `Phase` curve. It appears in
-  `--list-archetypes` automatically.
+  `dj set build --list-archetypes` automatically.
 - **Reshape** — add/move `Phase` points (more back-third peaks = more
   rotate-the-floor pulses).
 - **Retune intensity** — change `W_NRG / W_BPM / W_DRIVE` (sum to 1.0) or the

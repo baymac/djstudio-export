@@ -40,7 +40,7 @@ version = {file = "VERSION"}
 py-modules = ["dj_cli", "paths", "caffeinate", "assets", "update", "doctor"]
 
 [tool.setuptools.packages.find]
-include = ["detect*", "sync*", "enrich*", "playlist*", "export*", "connections*", "djstudio*", "rekordbox*", "helpers*", "apps*", "vj*"]
+include = ["detect*", "sync*", "enrich*", "playlist*", "export*", "set*", "connections*", "djstudio*", "rekordbox*", "helpers*", "apps*", "vj*"]
 
 [tool.setuptools.package-data]
 # Read-only source files accessed by external tools (swiftc, node).
