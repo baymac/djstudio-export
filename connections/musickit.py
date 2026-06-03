@@ -28,38 +28,6 @@ def _bridge_binary() -> Path:
     return binary
 
 
-def run_bridge(args: list[str], timeout: int = 600) -> subprocess.CompletedProcess:
-    binary = _bridge_binary()
-    return subprocess.run(
-        [str(binary)] + args,
-        capture_output=True, text=True, timeout=timeout,
-    )
-
-
-def check_musickit() -> tuple[bool, str]:
-    """Return (authorized, message). Exit code 2 = not authorized."""
-    try:
-        result = run_bridge(["--check"], timeout=30)
-        if result.returncode == 0:
-            return True, "MusicKit authorized"
-        if result.returncode == 2:
-            return False, (
-                "MusicKit not authorized.\n"
-                "Open the Music app, then re-run this command to grant access."
-            )
-        return False, f"MusicKit check failed (exit {result.returncode}): {result.stderr.strip()}"
-    except Exception as e:
-        return False, f"MusicKit check error: {e}"
-
-
-def list_playlists() -> list[str]:
-    """Return Apple Music playlist names via MusicKit."""
-    result = run_bridge(["--list-playlists"])
-    if result.returncode != 0:
-        raise RuntimeError(f"MusicKit error: {result.stderr.strip()}")
-    return json.loads(result.stdout.strip())
-
-
 def _stream_bridge(args: list[str]):
     """Run the MusicKit bridge with given args and yield track dicts from NDJSON stdout."""
     binary = _bridge_binary()
@@ -312,3 +280,99 @@ def create_apple_playlist(name: str, tracks: list[dict]) -> dict:
     except ValueError:
         added = 0
     return {"created": True, "name": name, "requested": len(tracks), "added": added}
+
+
+# ── Restore helpers (bulk `playlist push --library/--favorite-only/--readd-missing`) ──
+
+
+def library_track_key(title: str | None, artist: str | None) -> str:
+    """Stable name+artist key for matching a track against the library by content.
+
+    Used for `--readd-missing` idempotency: a re-added catalog track gets a fresh
+    persistent id, so we can't match it by the captured one — name+artist is what
+    survives the round-trip.
+    """
+    return f"{(title or '').strip().casefold()}\x00{(artist or '').strip().casefold()}"
+
+
+def read_library_track_keys() -> set[str]:
+    """Return the set of name+artist keys for every track currently in the library.
+
+    One AppleScript call (two `… of every track` reads, zipped in-script) so it's
+    fast even for thousands of tracks. Used to skip tracks already present.
+    """
+    script = "\n".join([
+        'tell application "Music"',
+        "set nms to (name of every track of library playlist 1)",
+        "set ars to (artist of every track of library playlist 1)",
+        'set out to ""',
+        "repeat with i from 1 to (count of nms)",
+        "   set out to out & (item i of nms) & tab & (item i of ars) & linefeed",
+        "end repeat",
+        "return out",
+        "end tell",
+    ])
+    out = _run_osascript(script, timeout=300)
+    keys: set[str] = set()
+    for line in out.split("\n"):
+        if not line:
+            continue
+        name, _, artist = line.partition("\t")
+        keys.add(library_track_key(name, artist))
+    return keys
+
+
+def readd_track_by_catalog_id(catalog_id: str) -> None:
+    """Best-effort: ask Music.app to add a catalog track back to the library.
+
+    macOS has NO supported API to add a catalog track to the library (MusicKit
+    `add` is `@available(macOS, unavailable)`), so this falls back to the `itmss://`
+    store-URL trick `restore_apple_music.py` uses. EXPERIMENTAL and unreliable:
+    region-locked / removed tracks won't add. Fire-and-forget — the caller paces the
+    calls and re-reads `read_library_track_keys()` afterwards to see what landed.
+    """
+    cid = (catalog_id or "").strip()
+    if not cid:
+        return
+    _run_osascript(
+        'tell application "Music" to open location '
+        f'"itmss://itunes.apple.com/song?id={cid}"',
+        timeout=30,
+    )
+
+
+def build_mark_loved_applescript(tracks: list[dict]) -> str:
+    """AppleScript that re-marks each track as loved (persistent id → name+artist). Pure."""
+    lines = ['tell application "Music"', "set n to 0"]
+    for t in tracks:
+        title = _osa_escape(t.get("title") or "")
+        artist = _osa_escape(t.get("artist") or "")
+        pid = _osa_escape(t.get("native_persistent_id") or "")
+        lines.append("set chosen to missing value")
+        if pid:
+            lines.append("try")
+            lines.append(f'set chosen to (first track of library playlist 1 whose persistent ID is "{pid}")')
+            lines.append("end try")
+        lines.append("if chosen is missing value then")
+        lines.append(f'set ms to (every track of library playlist 1 whose name is "{title}" '
+                     f'and artist is "{artist}")')
+        lines.append("if ms is not {} then set chosen to item 1 of ms")
+        lines.append("end if")
+        lines.append("if chosen is not missing value then")
+        lines.append("set loved of chosen to true")
+        lines.append("set n to n + 1")
+        lines.append("end if")
+    lines.append("return n as string")
+    lines.append("end tell")
+    return "\n".join(lines)
+
+
+def mark_loved(tracks: list[dict]) -> int:
+    """Re-mark captured favorite tracks as loved in the library. Returns the count set."""
+    if not tracks:
+        return 0
+    out = _run_osascript(build_mark_loved_applescript(tracks))
+    try:
+        return int(out or "0")
+    except ValueError:
+        return 0

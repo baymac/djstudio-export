@@ -287,6 +287,21 @@ class Spotify:
         r = self.client.delete(f"{_API}/playlists/{playlist_id}/followers")
         r.raise_for_status()
 
+    def save_tracks(self, track_ids: list[str]) -> int:
+        """Add tracks to the user's Liked Songs (`PUT /me/tracks`, batched by 50).
+
+        Idempotent — re-saving an already-liked track is a no-op. Returns the count
+        sent. Used by `playlist push --library` to restore Liked Songs.
+        """
+        ids = [t.split(":")[-1] for t in track_ids if t]
+        saved = 0
+        for i in range(0, len(ids), 50):
+            batch = ids[i:i + 50]
+            r = self.client.put(f"{_API}/me/tracks", json={"ids": batch})
+            r.raise_for_status()
+            saved += len(batch)
+        return saved
+
     def clear_saved_tracks(self) -> int:
         """Remove every track from the user's Liked Songs. Returns the count removed.
 

@@ -1,7 +1,6 @@
 """Argparse CLI for `dj sync` — capture / enrich / playlist management.
 
-  dj sync music [--playlist NAME | --library | --favorites]   capture Apple Music → sync_tracks
-  dj sync music check-connections | list-playlists
+  dj sync music [--playlist NAME | --library | --favorite-only]   capture Apple Music → sync_tracks
   dj sync spotify ...                                         (capture: fast-follow; see TODOS.md)
   dj sync beatport [--playlist NAME]                          Beatport playlists → enriched_tracks
   dj sync <app> playlist list                                 list captured playlists + ids
@@ -27,15 +26,6 @@ from rich.console import Console
 from rich.table import Table
 
 console = Console()
-
-_TOKEN_HINT = (
-    "Get fresh tokens:\n"
-    "  1. Open beatport.com in a browser (logged in)\n"
-    "  2. DevTools → Network → /api/auth/session → copy [bold]token.accessToken[/bold]\n"
-    "     → set as BEATPORT_ACCESS_TOKEN in .env\n"
-    "  3. DevTools → Application → Cookies → copy [bold]__Secure-next-auth.session-token[/bold]\n"
-    "     → set as BEATPORT_SESSION_TOKEN in .env"
-)
 
 # App key (CLI verb) → sync_tracks.app value.
 _APP_KEY = {"music": "apple_music", "spotify": "spotify"}
@@ -74,11 +64,32 @@ def _add_playlist_subcommands(parent_sub, app_key: str) -> None:
     delete_p = pl_sub.add_parser(
         "delete", help="Delete playlists from the source app (backup in dj.db is kept).")
     _add_delete_scope_args(delete_p, app_key)
-    push_p = pl_sub.add_parser("push", help="Create an app playlist from selected sync_tracks.")
-    push_p.add_argument("--name", "-n", required=True, help="Target playlist name (new).")
+    push_p = pl_sub.add_parser(
+        "push", help="Recreate app playlists from sync_tracks (ad-hoc selection or bulk restore).")
+    push_p.add_argument("--name", "-n", help="Target playlist name (ad-hoc mode; with --ids/--query).")
     push_p.add_argument("--ids", help="Comma-separated sync_tracks ids to push.")
     push_p.add_argument("--query", "-q",
                         help="SQL selecting sync_tracks rows (must return app + native_track_id).")
+    if app_key == "music":
+        # Bulk restore from the dj.db backup (mirrors `playlist delete` scopes).
+        push_p.add_argument("--all", dest="restore_all", action="store_true",
+                            help="Restore everything: library + all playlists + favorites.")
+        push_p.add_argument("--playlists", dest="restore_playlists", action="store_true",
+                            help="Recreate every captured playlist (matches in-library tracks).")
+        push_p.add_argument("--library", dest="restore_library", action="store_true",
+                            help="Repopulate the library from captured __library__ rows (re-add).")
+        push_p.add_argument("--favorite-only", dest="restore_favorites", action="store_true",
+                            help="Restore favorites (re-mark loved). Combinable with --library.")
+        push_p.add_argument("--readd-missing", dest="readd_missing", action="store_true",
+                            help="Only act on tracks not already in the library; re-add them from "
+                                 "the Apple Music catalog (best-effort; resumable).")
+    elif app_key == "spotify":
+        push_p.add_argument("--all", dest="restore_all", action="store_true",
+                            help="Restore everything: Liked Songs + all playlists.")
+        push_p.add_argument("--playlists", dest="restore_playlists", action="store_true",
+                            help="Recreate every captured playlist (adds tracks by id).")
+        push_p.add_argument("--library", dest="restore_library", action="store_true",
+                            help="Re-save captured Liked Songs.")
     push_p.add_argument("--dry-run", action="store_true", help="Show what would be pushed.")
     push_p.add_argument("--verbose", "-v", action="store_true", help="List selected tracks.")
 
@@ -91,27 +102,29 @@ def add_sync_subparser(parent) -> argparse.ArgumentParser:
     # ── music ─────────────────────────────────────────────────────────────────
     music_p = sync_sub.add_parser("music", help="Capture Apple Music playlists into sync_tracks.")
     music_p.add_argument("--playlist", "-p", default=None, metavar="NAME",
-                         help="Capture only this Apple Music playlist (default: all).")
+                         help="Capture only this Apple Music playlist (default: everything).")
     music_p.add_argument("--library", dest="use_library", action="store_true",
-                         help="Capture library songs (incremental via cursor).")
-    music_p.add_argument("--favorites", dest="use_favorites", action="store_true",
-                         help="Capture the 'Favourite Songs' playlist.")
+                         help="Capture only library songs (incremental via cursor).")
+    music_p.add_argument("--favorites", "--favorite-only", dest="use_favorites", action="store_true",
+                         help="Capture only the 'Favourite Songs' playlist (combinable with --library).")
+    music_p.add_argument("--all", dest="sync_all", action="store_true",
+                         help="Capture everything: all playlists + library + Favourite Songs (the default).")
     music_p.add_argument("--limit", type=int, default=0, metavar="N",
                          help="Stop after capturing N tracks (0 = no limit).")
     music_p.add_argument("--dry-run", action="store_true", help="Show what would be captured.")
     music_p.add_argument("--verbose", "-v", action="store_true", help="Per-playlist detail.")
     music_sub = music_p.add_subparsers(dest="music_command")
     music_sub.required = False
-    music_sub.add_parser("check-connections", help="Verify MusicKit + Beatport credentials.")
-    music_sub.add_parser("list-playlists", help="List Apple Music playlist names.")
     _add_playlist_subcommands(music_sub, "music")
 
     # ── spotify ─────────────────────────────────────────────────────────────────
     spotify_p = sync_sub.add_parser("spotify", help="Capture Spotify playlists into sync_tracks.")
     spotify_p.add_argument("--playlist", "-p", default=None, metavar="NAME",
-                           help="Capture only this Spotify playlist (default: all).")
+                           help="Capture only this Spotify playlist (default: everything).")
     spotify_p.add_argument("--library", dest="use_library", action="store_true",
-                           help="Capture Liked Songs.")
+                           help="Capture only Liked Songs.")
+    spotify_p.add_argument("--all", dest="sync_all", action="store_true",
+                           help="Capture everything: all playlists + Liked Songs (the default).")
     spotify_p.add_argument("--limit", type=int, default=0, metavar="N",
                            help="Stop after capturing N tracks (0 = no limit).")
     spotify_p.add_argument("--dry-run", action="store_true", help="Show what would be captured.")
@@ -124,6 +137,8 @@ def add_sync_subparser(parent) -> argparse.ArgumentParser:
     bp_p = sync_sub.add_parser("beatport", help="Sync Beatport playlists → enriched_tracks.")
     bp_p.add_argument("--playlist", "-p", default=None, metavar="NAME",
                       help="Sync only this Beatport playlist (default: all).")
+    bp_p.add_argument("--all", dest="sync_all", action="store_true",
+                      help="Sync all Beatport playlists (the default; for symmetry with music/spotify).")
     bp_p.add_argument("--limit", type=int, default=0, metavar="N", help="Stop after N new tracks.")
     bp_p.add_argument("--dry-run", action="store_true", help="Show what would be synced.")
     bp_p.add_argument("--verbose", "-v", action="store_true", help="Per-track detail.")
@@ -143,10 +158,17 @@ def add_sync_subparser(parent) -> argparse.ArgumentParser:
                            help="Sync + delete without interactive prompts.")
     bp_delete.add_argument("--dry-run", action="store_true",
                            help="Show what would be synced and deleted; change nothing.")
-    bp_push = bp_pl_sub.add_parser("push", help="Create a Beatport playlist from selected tracks.")
-    bp_push.add_argument("--name", "-n", required=True, help="Target Beatport playlist name (new or reused).")
+    bp_push = bp_pl_sub.add_parser(
+        "push", help="Create a Beatport playlist from selected tracks, or restore all (--all).")
+    bp_push.add_argument("--name", "-n", help="Target Beatport playlist name (ad-hoc; with --ids/--query).")
     bp_push.add_argument("--ids", help="Comma-separated beatport_ids to push.")
     bp_push.add_argument("--query", "-q", help="SQL selecting rows (must return beatport_id).")
+    # Bulk restore: recreate every captured Beatport playlist on the account. Beatport
+    # has no library/liked concept, so --all and --playlists are equivalent.
+    bp_push.add_argument("--all", dest="restore_all", action="store_true",
+                         help="Recreate every captured Beatport playlist on the account.")
+    bp_push.add_argument("--playlists", dest="restore_playlists", action="store_true",
+                         help="Alias of --all (Beatport has only playlists).")
     bp_push.add_argument("--dry-run", action="store_true", help="Show what would be pushed.")
     bp_push.add_argument("--verbose", "-v", action="store_true", help="List selected tracks.")
 
@@ -188,6 +210,23 @@ def _sync_app_playlist(app_key: str, args) -> None:
         return
 
     if pl_command == "push":
+        scopes = _restore_scopes(args)
+        if scopes:
+            if app_key == "music":
+                from sync.restore import restore_music
+                restore_music(
+                    scopes=scopes,
+                    readd_missing=getattr(args, "readd_missing", False),
+                    dry_run=args.dry_run, verbose=args.verbose,
+                )
+            else:  # spotify — library = Liked Songs, no favorites/re-add
+                from sync.restore import restore_spotify
+                restore_spotify(scopes=scopes, dry_run=args.dry_run, verbose=args.verbose)
+            return
+        if not args.name:
+            console.print("[red]Error:[/red] ad-hoc push needs --name (with --ids/--query); "
+                          "or use a bulk restore scope (--all/--playlists/--library/--favorite-only).")
+            sys.exit(1)
         from sync.push import push_playlist
         push_playlist(
             app_key, args.name,
@@ -197,7 +236,22 @@ def _sync_app_playlist(app_key: str, args) -> None:
         return
 
     console.print(f"Usage: dj sync {app_key} playlist [list | delete --all|--playlists | "
-                  "push --name NAME --ids ...|--query ...]")
+                  "push --name NAME --ids ...|--query ... | "
+                  "push --all|--playlists|--library|--favorite-only]")
+
+
+def _restore_scopes(args) -> set[str]:
+    """Resolve music bulk-restore scope flags into {'library','playlists','favorites'}."""
+    if getattr(args, "restore_all", False):
+        return {"library", "playlists", "favorites"}
+    scopes = set()
+    if getattr(args, "restore_library", False):
+        scopes.add("library")
+    if getattr(args, "restore_playlists", False):
+        scopes.add("playlists")
+    if getattr(args, "restore_favorites", False):
+        scopes.add("favorites")
+    return scopes
 
 
 # The app-wide collection captured as the `__library__` pseudo-playlist: Apple Music
@@ -359,6 +413,14 @@ def _beatport_playlist_ops(args) -> None:
         return
 
     if pl_command == "push":
+        if getattr(args, "restore_all", False) or getattr(args, "restore_playlists", False):
+            from sync.restore import restore_beatport
+            restore_beatport(dry_run=args.dry_run, verbose=args.verbose)
+            return
+        if not args.name:
+            console.print("[red]Error:[/red] ad-hoc push needs --name (with --ids/--query); "
+                          "or use --all to restore every captured Beatport playlist.")
+            sys.exit(1)
         _beatport_playlist_push(args)
         return
 
@@ -465,7 +527,6 @@ def _beatport_playlist_push(args) -> None:
 
 
 def dispatch(args, sync_p: argparse.ArgumentParser) -> None:
-    from connections import musickit
     from detect import db as detect_db
     from sync import db as sync_db
 
@@ -482,50 +543,17 @@ def dispatch(args, sync_p: argparse.ArgumentParser) -> None:
     if args.sync_command == "music":
         music_command = getattr(args, "music_command", None)
 
-        if music_command == "check-connections":
-            from connections.beatport import make_bp_client
-            console.print("Checking MusicKit…", end=" ")
-            authorized, msg = musickit.check_musickit()
-            console.print("[green]OK[/green]" if authorized else f"[red]FAILED[/red]\n{msg}")
-            console.print("Checking Beatport…", end=" ")
-            try:
-                beatport, client = make_bp_client()
-                playlists = beatport.list_my_playlists()
-                console.print(f"[green]OK[/green] ({len(playlists)} playlists found)")
-                client.close()
-            except SystemExit:
-                raise
-            except Exception as e:
-                console.print(f"[red]FAILED[/red]\n{e}")
-                if "401" in str(e):
-                    console.print(f"\n[yellow]{_TOKEN_HINT}[/yellow]")
-            return
-
-        if music_command == "list-playlists":
-            console.print("Fetching playlists from Apple Music…")
-            try:
-                names = musickit.list_playlists()
-            except RuntimeError as e:
-                console.print(f"[red]Error:[/red] {e}")
-                sys.exit(1)
-            for name in sorted(names):
-                console.print(f"  {name}")
-            console.print(f"\n[dim]{len(names)} playlists[/dim]")
-            return
-
         if music_command == "playlist":
             _sync_app_playlist("music", args)
             return
 
-        # No subcommand → capture.
-        if args.use_library and args.use_favorites:
-            console.print("[red]Error:[/red] --library and --favorites are mutually exclusive.")
-            sys.exit(1)
+        # No subcommand → capture. --library + --favorite-only may combine; --all = all three.
         from sync.capture import run_sync_music
         run_sync_music(
             playlist=args.playlist,
             use_library=args.use_library,
             use_favorites=args.use_favorites,
+            use_all=args.sync_all,
             limit=args.limit,
             verbose=args.verbose,
             dry_run=args.dry_run,
@@ -542,6 +570,7 @@ def dispatch(args, sync_p: argparse.ArgumentParser) -> None:
         run_sync_spotify(
             playlist=args.playlist,
             use_library=args.use_library,
+            use_all=args.sync_all,
             limit=args.limit,
             verbose=args.verbose,
             dry_run=args.dry_run,
@@ -555,7 +584,9 @@ def dispatch(args, sync_p: argparse.ArgumentParser) -> None:
             _beatport_playlist_ops(args)
             return
         from detect.sync_beatport import run_sync_beatport
+        # Beatport has only playlists, so --all == the default (all playlists, no filter).
         run_sync_beatport(
-            dry_run=args.dry_run, verbose=args.verbose, limit=args.limit, playlist=args.playlist,
+            dry_run=args.dry_run, verbose=args.verbose, limit=args.limit,
+            playlist=None if args.sync_all else args.playlist,
         )
         return

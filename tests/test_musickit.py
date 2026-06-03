@@ -64,3 +64,31 @@ def test_read_persistent_ids_swallows_applescript_error(monkeypatch):
         raise RuntimeError("osascript failed")
     monkeypatch.setattr(mk, "_run_osascript", boom)
     assert mk.read_playlist_persistent_ids("Gone") is None
+
+
+def test_library_track_key_normalises():
+    assert mk.library_track_key("  Glue ", "Bicep") == mk.library_track_key("glue", "BICEP")
+    assert mk.library_track_key("A", "B") != mk.library_track_key("A", "C")
+
+
+def test_mark_loved_applescript_prefers_persistent_id():
+    script = mk.build_mark_loved_applescript([
+        {"title": "Glue", "artist": "Bicep", "native_persistent_id": "PID9"},
+    ])
+    assert 'whose persistent ID is "PID9"' in script
+    assert "set loved of chosen to true" in script
+    assert 'whose name is "Glue" and artist is "Bicep"' in script  # fallback present
+
+
+def test_readd_track_noop_on_empty(monkeypatch):
+    called = []
+    monkeypatch.setattr(mk, "_run_osascript", lambda *a, **k: called.append(a))
+    mk.readd_track_by_catalog_id("")
+    assert called == []  # no catalog id → no osascript
+
+
+def test_readd_track_opens_itmss_url(monkeypatch):
+    seen = {}
+    monkeypatch.setattr(mk, "_run_osascript", lambda script, **k: seen.setdefault("s", script))
+    mk.readd_track_by_catalog_id("1440857781")
+    assert "itmss://itunes.apple.com/song?id=1440857781" in seen["s"]

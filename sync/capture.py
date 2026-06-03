@@ -38,6 +38,7 @@ def run_sync_music(
     playlist: str | None = None,
     use_library: bool = False,
     use_favorites: bool = False,
+    use_all: bool = False,
     limit: int = 0,
     verbose: bool = False,
     dry_run: bool = False,
@@ -45,13 +46,21 @@ def run_sync_music(
     if dry_run:
         console.print("[yellow]DRY RUN[/yellow] — no changes will be made")
 
+    # No scope given → capture EVERYTHING (playlists + library + Favourite Songs).
+    # A named --playlist or an explicit --library/--favorite-only narrows it instead.
+    if not (use_library or use_favorites or playlist):
+        use_all = True
+    do_library = use_all or use_library
+    do_favorites = use_all or use_favorites
+    do_playlists = use_all or (not use_library and not use_favorites)
+
     try:
-        if use_library:
-            _capture_library(limit, verbose, dry_run)
-        elif use_favorites:
-            _capture_favorites(limit, verbose, dry_run)
-        else:
+        if do_playlists:
             _capture_all_playlists(playlist, limit, verbose, dry_run)
+        if do_library:
+            _capture_library(limit, verbose, dry_run)
+        if do_favorites:
+            _capture_favorites(limit, verbose, dry_run)
     except RuntimeError as e:
         console.print(f"[red]MusicKit error:[/red] {e}")
         sys.exit(1)
@@ -158,6 +167,7 @@ def run_sync_spotify(
     *,
     playlist: str | None = None,
     use_library: bool = False,
+    use_all: bool = False,
     limit: int = 0,
     verbose: bool = False,
     dry_run: bool = False,
@@ -170,6 +180,7 @@ def run_sync_spotify(
         _run_sync_spotify_impl(
             playlist=playlist,
             use_library=use_library,
+            use_all=use_all,
             limit=limit,
             verbose=verbose,
             dry_run=dry_run,
@@ -180,6 +191,7 @@ def _run_sync_spotify_impl(
     *,
     playlist: str | None,
     use_library: bool,
+    use_all: bool,
     limit: int,
     verbose: bool,
     dry_run: bool,
@@ -198,27 +210,32 @@ def _run_sync_spotify_impl(
     try:
         # Build the list of capture targets: (native_playlist_id, name, fetch_fn).
         # Liked Songs is modelled as a single pseudo-playlist so the logging path
-        # is identical to the per-playlist one.
-        if use_library:
-            console.print("Fetching Spotify Liked Songs…")
-            targets = [(LIBRARY_PID, "Liked Songs", client.saved_tracks)]
-            console.print("Found [bold]1[/bold] collection")
-        else:
+        # is identical to the per-playlist one. No scope given → capture EVERYTHING
+        # (playlists + Liked Songs); --library = Liked Songs only; --playlist narrows.
+        if not (use_library or playlist):
+            use_all = True
+        do_library = use_all or use_library
+        do_playlists = use_all or not use_library
+        targets = []
+        if do_playlists:
             console.print("Fetching Spotify playlists…")
             playlists = client.list_my_playlists()
             if playlist:
                 playlists = [p for p in playlists if p["name"] == playlist]
-            if not playlists:
-                console.print("[dim]No matching playlists.[/dim]")
-                return
             if playlist:
                 console.print(f'Syncing playlist [bold]"{playlist}"[/bold]')
             else:
                 console.print(f"Found [bold]{len(playlists)}[/bold] playlists")
-            targets = [
+            targets += [
                 (pl["id"], pl["name"], (lambda pid=pl["id"]: client.playlist_tracks(pid)))
                 for pl in playlists
             ]
+        if do_library:
+            console.print("Fetching Spotify Liked Songs…")
+            targets.append((LIBRARY_PID, "Liked Songs", client.saved_tracks))
+        if not targets:
+            console.print("[dim]Nothing to capture.[/dim]")
+            return
 
         total_new = total_skipped = total_removed = 0
         inaccessible = 0

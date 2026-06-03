@@ -342,6 +342,24 @@ def list_playlists(app: str, db_path: Path | None = None) -> list[sqlite3.Row]:
         ).fetchall()
 
 
+def tracks_in_native_playlist(app: str, native_playlist_id: str,
+                              db_path: Path | None = None) -> list[sqlite3.Row]:
+    """Full sync_tracks rows for one captured playlist (or `__library__`/`__favorites__`), in order.
+
+    Used by bulk restore (`playlist push --all/--playlists/--library/--favorite-only`).
+    Returns whole rows (artist/title/album/native_track_id/native_persistent_id) so
+    the restore can match by persistent id and re-add by catalog id.
+    """
+    with _conn(db_path) as con:
+        return con.execute(
+            """SELECT t.* FROM sync_tracks t
+               JOIN sync_playlist_tracks m ON m.sync_track_id = t.id
+               WHERE m.app = ? AND m.native_playlist_id = ?
+               ORDER BY m.position""",
+            (app, native_playlist_id),
+        ).fetchall()
+
+
 # `dj.db` is the permanent backup — there is intentionally no DB-side delete for
 # captured playlists/tracks. `dj sync <app> playlist delete` removes a playlist
 # from the SOURCE APP only (see sync/cli.py); the captured rows here are kept.

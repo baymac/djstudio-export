@@ -149,6 +149,21 @@ def test_migrate_adds_persistent_id_column_to_old_split_db(tmp_path, monkeypatch
     assert "native_persistent_id" in cols
 
 
+def test_tracks_in_native_playlist_ordered_full_rows(tmp_db):
+    sdb.replace_playlist("apple_music", "__library__", [
+        {"native_track_id": "c1", "artist": "A", "title": "T1", "album": "Al1",
+         "native_persistent_id": "P1", "playlist_name": "Library", "position": 1},
+        {"native_track_id": "c2", "artist": "B", "title": "T2", "album": "Al2",
+         "native_persistent_id": "P2", "playlist_name": "Library", "position": 0},
+    ], db_path=tmp_db)
+    rows = sdb.tracks_in_native_playlist("apple_music", "__library__", db_path=tmp_db)
+    # ordered by position, and carries the columns restore needs
+    assert [r["title"] for r in rows] == ["T2", "T1"]
+    assert rows[0]["native_track_id"] == "c2"
+    assert rows[0]["native_persistent_id"] == "P2"
+    assert rows[1]["album"] == "Al1"
+
+
 def test_no_db_side_delete_for_captured_playlists(tmp_db):
     # dj.db is the permanent backup: `playlist delete` removes from the source app,
     # never from our DB. The old local-clear helpers are intentionally gone.
