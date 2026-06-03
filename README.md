@@ -50,20 +50,18 @@ Every verb + its flags:
 ```
 dj
 ├── sync                                                capture source-app libraries → enriched library
-│   ├── music    [--playlist NAME] [--library] [--favorites] [--limit N] [--dry-run] [--verbose]
-│   │   ├── check-connections                           Verify MusicKit + Beatport credentials
-│   │   ├── list-playlists                              List Apple Music playlist names
+│   ├── music    [--all] [--playlist NAME] [--library] [--favorite-only] [--limit N] [--dry-run] [--verbose]   (default/--all = playlists + library + Favourite Songs)
 │   │   └── playlist
 │   │       ├── list                                    Captured playlists + ids
 │   │       ├── delete  (--all | --playlists) [--no-sync] [--yes] [--dry-run]   Delete from the APP (dj.db backup kept)
-│   │       └── push    --name NAME (--ids ID,… | --query SQL) [--dry-run] [--verbose]
-│   ├── spotify  [--playlist NAME] [--library] [--limit N] [--dry-run] [--verbose]
-│   │   └── playlist   list | delete (--all|--playlists) [--no-sync] [--yes] [--dry-run] | push --name … (--ids|--query)
-│   └── beatport [--playlist NAME] [--limit N] [--dry-run] [--verbose]   Pull Beatport playlists → enriched_tracks
+│   │       └── push    --name NAME (--ids ID,… | --query SQL)  |  restore: --all|--playlists|--library|--favorite-only [--readd-missing] [--dry-run]
+│   ├── spotify  [--all] [--playlist NAME] [--library] [--limit N] [--dry-run] [--verbose]   (default/--all = playlists + Liked Songs)
+│   │   └── playlist   list | delete (--all|--playlists) … | push --name … (--ids|--query) | restore --all|--playlists|--library
+│   └── beatport [--all] [--playlist NAME] [--limit N] [--dry-run] [--verbose]   Pull Beatport playlists → enriched_tracks
 │       └── playlist
 │           ├── list
 │           ├── delete  --all [--no-sync] [--yes] [--dry-run]            Delete every Beatport playlist (enriched_tracks kept)
-│           └── push    --name NAME (--ids ID,… | --query SQL) [--dry-run] [--verbose]
+│           └── push    --name NAME (--ids ID,… | --query SQL)  |  --all (restore every captured playlist)
 │
 ├── detect                                              detect tracks (Shazam audio + tracklist parsers)
 │   ├── instagram      <url>  [-u USER] [-p PASS] [-o FILE] [--json] [--dry-run]
@@ -124,12 +122,14 @@ Faithfully captures your Apple Music and Spotify playlists into the local DB, th
 
 ```bash
 # Capture (faithful, → sync_tracks + sync_playlist_tracks)
-uv run dj_cli.py sync music                          # all Apple Music playlists
-uv run dj_cli.py sync music --library                # library songs (incremental via cursor)
-uv run dj_cli.py sync music --favorites              # Favourite Songs
-uv run dj_cli.py sync music --playlist "Ibiza 2026"  # one named playlist
-uv run dj_cli.py sync spotify                        # all Spotify playlists (OAuth on first run)
-uv run dj_cli.py sync spotify --library              # Spotify Liked Songs
+uv run dj_cli.py sync music                          # EVERYTHING (default): all playlists + library + Favourite Songs
+uv run dj_cli.py sync music --library                # only library songs (incremental via cursor)
+uv run dj_cli.py sync music --favorites              # only Favourite Songs (alias: --favorite-only)
+uv run dj_cli.py sync music --library --favorite-only # only those two (combinable)
+uv run dj_cli.py sync music --playlist "Ibiza 2026"  # only one named playlist
+uv run dj_cli.py sync spotify                        # EVERYTHING (default): all playlists + Liked Songs (OAuth on first run)
+uv run dj_cli.py sync spotify --library              # only Liked Songs
+#   --all is the explicit form of the default; a named --playlist or scope flag narrows it.
 #   common flags: --limit N --dry-run --verbose
 
 # Enrich captured tracks → enriched_tracks (`dj enrich` covers both sources)
@@ -152,6 +152,19 @@ uv run dj_cli.py sync music   playlist delete --all         # the above + clears
 uv run dj_cli.py sync spotify playlist delete --playlists   # unfollow all playlists (Liked Songs kept)
 uv run dj_cli.py sync spotify playlist delete --all         # the above + clears Liked Songs
 uv run dj_cli.py sync beatport playlist delete --all --yes  # every Beatport playlist, no prompts
+
+# Restore the SOURCE APP from the dj.db backup. Inverse of delete.
+uv run dj_cli.py sync music    playlist push --playlists                 # recreate all playlists (matches in-library tracks)
+uv run dj_cli.py sync music    playlist push --library --readd-missing   # repopulate the library; only re-add what's missing (resumable)
+uv run dj_cli.py sync music    playlist push --favorite-only             # re-mark captured favorites as loved
+uv run dj_cli.py sync music    playlist push --all --readd-missing       # library + playlists + favorites
+uv run dj_cli.py sync spotify  playlist push --playlists                 # recreate all playlists (adds tracks by id)
+uv run dj_cli.py sync spotify  playlist push --library                   # re-save Liked Songs
+uv run dj_cli.py sync spotify  playlist push --all                       # Liked Songs + all playlists
+uv run dj_cli.py sync beatport playlist push --all                       # recreate every Beatport playlist on the account
+#   Apple Music catalog re-add (--library/--favorite-only/--readd-missing) is best-effort via the
+#   itmss:// trick — region-locked/removed tracks can't be re-added on macOS, and are skipped.
+#   Spotify & Beatport restore are exact (the APIs add tracks by id; no re-add hack needed).
 ```
 
 Spotify auth uses an Authorization-Code OAuth flow on first run (set `SPOTIFY_CLIENT_ID`/`SPOTIFY_CLIENT_SECRET`, redirect `http://127.0.0.1:8888/callback`); the refresh token is cached in `auth_cache`. Spotify's own algorithmic/editorial playlists (Discover Weekly, Release Radar, …) return 404 on their tracks endpoint and are skipped, not fatal. `dj sync music --library` tracks the last `library_added_date` in the `cursors` table so re-runs only capture new Apple Music additions. Logs: `~/Music/dj/logs/sync-spotify/` and `~/Music/dj/logs/sync-beatport/`.

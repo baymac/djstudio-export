@@ -9,6 +9,9 @@ live external paths can't run in CI — verify once on the real machine:
   stored in `auth_cache`. Confirm the OAuth round-trip + that capture/push hit the account.
 - **Apple Music push** — confirm `dj sync music playlist push` creates the playlist in
   Music.app and adds the matched tracks.
+- **Bulk restore** (v0.1.6.0) — confirm `dj sync <app> playlist push --all/--playlists/--library/--favorite-only`
+  rebuilds each app from the backup. Apple Music catalog re-add (`--library`/`--favorite-only`/`--readd-missing`)
+  is best-effort via `itmss://` — verify how reliably region-available tracks actually land.
 
 ## Done (this PR)
 - **`dj sync spotify` capture** — user-scoped OAuth client (`connections/spotify.py`),
@@ -20,6 +23,9 @@ live external paths can't run in CI — verify once on the real machine:
 ## Known limitations
 - **Apple Music push is library-scoped.** MusicKit's `createPlaylist` is unavailable on
   macOS, so push scripts Music.app and matches each track by exact name+artist within the
-  local library. Tracks not in the library won't be added (fine for convert-back, since
-  captured tracks came from the library). A non-exact title/artist won't match.
+  local library. Tracks not in the library won't be added by ad-hoc push (fine for
+  convert-back, since captured tracks came from the library). A non-exact title/artist
+  won't match. As of v0.1.6.0, bulk restore (`--library`/`--favorite-only`/`--readd-missing`)
+  can best-effort re-add catalog tracks via the `itmss://` trick, but region-locked/removed
+  tracks still can't be re-added on macOS.
 - **Spotify push** creates a private playlist owned by the authenticated user.

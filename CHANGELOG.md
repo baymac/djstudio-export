@@ -2,7 +2,18 @@
 
 All notable changes to this project will be documented in this file.
 
-## [0.1.5.0] - 2026-06-02
+## [0.1.6.0] - 2026-06-03
+
+### Added
+- **Bulk restore — rebuild a source app from the `dj.db` backup** (`dj sync <app> playlist push` with restore scopes, `sync/restore.py`). The inverse of `playlist delete`, run library → playlists → favorites. **Apple Music**: `--playlists` recreates each captured playlist (matches in-library tracks), `--library` repopulates the library, `--favorite-only` re-marks captured favorites as loved, `--all` does all three; `--readd-missing` skips tracks already in the library so a catalog re-add is idempotent and resumable. Catalog re-add (`--library`/`--favorite-only`) is best-effort via the `itmss://` trick — region-locked or removed tracks can't be re-added on macOS and are skipped. **Spotify**: `--playlists` recreates each playlist, `--library` re-saves Liked Songs, `--all` does both — exact (the Web API adds by id, no re-add hack). **Beatport**: `--all`/`--playlists` recreate every captured playlist on the account.
+- **`Spotify.save_tracks`** — add tracks to Liked Songs (`PUT /me/tracks`, batched by 50, idempotent), backing `spotify playlist push --library`.
+
+### Changed
+- **`dj sync music|spotify` now captures everything by default** — with no scope flag, capture grabs all playlists + the library (Apple Music: + Favourite Songs). `--library` and `--favorite-only` now *narrow* to just that collection and are combinable; `--all` is the explicit form of the default. A named `--playlist` still narrows to one playlist. `--favorites` is kept as an alias of `--favorite-only`. `dj sync beatport` gains a no-op `--all` for symmetry.
+
+### Removed
+- **`dj sync music check-connections` and `list-playlists`** — dead subcommands (and their MusicKit bridge wrappers `run_bridge`/`check_musickit`/`list_playlists`) removed.
+
 
 ### Added
 - **`dj export set <id> --to bp_chart|bp_playlist|rekordbox`** — push a stored set's tracks, in set order, to a publishable Beatport chart (created as an unpublished draft), a Beatport playlist, or a rekordbox playlist. `--name` overrides the destination name; `--description` (chart only) defaults to a line built from the set's mood/duration/archetype; every destination accepts `--dry-run`.
