@@ -331,7 +331,10 @@ def run_enrich_engine(
 
             match, score = best_match(title, artist, results, threshold)
             if not match:
-                # Retry with base title when a remix/edit/mix tag caused the mismatch
+                # Retry with base title when a remix/edit/mix tag caused the mismatch.
+                # Within that broader search, first try the original title (with remix) in
+                # case the remix version appears in results for the base-title query — then
+                # fall back to matching the stripped title if it doesn't.
                 base_title = strip_remix(title)
                 if base_title:
                     base_query = f"{artist_query} {search_query(base_title)}"
@@ -342,12 +345,20 @@ def run_enrich_engine(
                     except Exception:
                         base_results = None
                     if base_results:
-                        match, score = best_match(base_title, artist, base_results, threshold)
-                        if match and verbose:
-                            progress.log(
-                                f"[green]remix fallback:[/green] {artist} — {title}  "
-                                f"→  matched as base title '{base_title}'  (score={score:.2f})"
-                            )
+                        match, score = best_match(title, artist, base_results, threshold)
+                        if match:
+                            if verbose:
+                                progress.log(
+                                    f"[green]remix fallback (remix match):[/green] {artist} — {title}  "
+                                    f"→  found remix in base search  (score={score:.2f})"
+                                )
+                        else:
+                            match, score = best_match(base_title, artist, base_results, threshold)
+                            if match and verbose:
+                                progress.log(
+                                    f"[green]remix fallback (base match):[/green] {artist} — {title}  "
+                                    f"→  matched as base title '{base_title}'  (score={score:.2f})"
+                                )
 
             # SoundCloud uploaders sometimes use "Title - Artist (Mix)" instead of
             # the standard "Artist - Title (Mix)" — re-score the same Beatport
