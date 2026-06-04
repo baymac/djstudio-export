@@ -396,6 +396,7 @@ uv run dj_cli.py enrich metadata --retry-misses       # retry previously missed 
 
 - **A miss is remembered.** A track with no Beatport result or a match below `--threshold` is marked a miss and skipped on future runs — pass `--retry-misses` to give those another shot (useful after Beatport adds the release, or with a looser `--threshold`).
 - **Raise `--threshold` if you're getting wrong matches; lower it if good tracks are being missed.** Default 0.72.
+- **SoundCloud/YouTube tracks with `[Artist Remix]`-style titles match correctly.** Square-bracket remix tags (e.g. `Song [Ben Böhmer Remix]`) are expanded to searchable words rather than stripped, so the correct remix version is found. Pure label/editorial tags like `[KEINEMUSIK]` are still stripped. If a track with a remix title was enriched incorrectly before, re-run with `--retry-misses` or pass `--ids <beatport_id> --force`.
 - Both sources write to the same `enriched_tracks` table — analysis and export don't care which path a track came from.
 - This command runs long on a large library (sequential Beatport calls), so it holds your Mac awake automatically.
 - Log: `~/Music/dj/logs/enrich/YYYY-MM-DD_<run_id>.log`. Every command logs to `~/Music/dj/logs/<command>/` automatically.
