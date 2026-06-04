@@ -4,7 +4,9 @@ Unified DJ toolkit. Builds a fully-analysed track library: pull tracks in from A
 
 ## Tour
 
-<video src="https://github.com/baymac/dj/raw/baymac/dj-cli-demo-hyperframes/docs/promo/dj-demo/renders/dj-demo.mp4" poster="docs/promo/dj-demo/poster.png" controls width="100%"></video>
+<img src="docs/promo/dj-demo/dj-demo.gif" alt="dj demo — sync · detect · enrich · build the set" width="100%">
+
+▶ [Watch with sound (HD)](docs/promo/dj-demo/renders/dj-demo.mp4)
 
 All tool-generated files live under `~/Music/dj/`:
 
