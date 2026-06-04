@@ -1,3 +1,3 @@
 .DS_Store
-.thumbnails/
-renders/*_*.mp4
+**/.thumbnails/
+**/renders/*_*.mp4
