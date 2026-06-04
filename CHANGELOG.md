@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.6.3] - 2026-06-04
+
+### Changed
+- **README tour section** — added a demo video walkthrough at the top of the README (sync · detect · enrich · build the set), so you can see the full pipeline in action before reading the docs. Diagram images now use `<img>` tags with explicit widths so they render at a readable size on GitHub.
+
 ## [0.1.6.2] - 2026-06-04
 
 ### Fixed

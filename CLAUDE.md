@@ -4,7 +4,7 @@ Guidance to Claude Code for this repository.
 
 ## Project Overview
 
-Unified DJ tool. Builds a fully-analysed track library by progressively enriching each track with Beatport metadata, DJ Studio analysis, and rekordbox phrase tags. Then any SQL-curated subset can be pushed to a Beatport playlist, a rekordbox playlist, or a DJ Studio mix.
+Unified DJ tool. Builds a fully-analysed track library by progressively enriching each track with Beatport metadata and DJ Studio analysis (key/energy/stems). Build energy-sequenced sets with `dj set build`, then push any stored set or SQL-curated subset to a Beatport chart/playlist or a rekordbox playlist.
 
 All tool-generated files live under `~/Music/dj/` (DB at `dj.db`, per-command logs at `logs/<cmd>/`, state at `state/`, etc). `paths.py` is the single source of truth and auto-migrates old locations on first import.
 
@@ -48,6 +48,9 @@ enrich/                         Unified enrichment + DJ Studio analysis
 
 playlist/                       SQL → rows helper (consumed by `dj export beatport|rekordbox`)
   query.py                      Run user SQL → list[beatport_id] + full-row fetch
+
+set/                            Energy-curve set builder
+  cli.py                        `dj set build` — sequence tracks along an archetype intensity curve
 
 export/                         The single home for pushing tracks out
   to_beatport.py                push_to_beatport (playlist) + push_to_beatport_chart

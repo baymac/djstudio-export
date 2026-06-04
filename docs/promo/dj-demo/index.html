@@ -1,0 +1,911 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=1920, height=1080" />
+    <script src="https://cdn.jsdelivr.net/npm/gsap@3.14.2/dist/gsap.min.js"></script>
+    <style>
+      * { margin: 0; padding: 0; box-sizing: border-box; }
+      html, body {
+        margin: 0;
+        width: 1920px;
+        height: 1080px;
+        overflow: hidden;
+        background: #0a0d0c;
+      }
+
+      :root {
+        --bg: #0a0d0c;
+        --panel: #11160f;
+        --line: #1f2a1d;
+        --fg: #eaf2ec;
+        --dim: #79897a;
+        --acc: #c6ff3d;
+        --acc-deep: #8fbf1f;
+        --display: "Archivo Black", sans-serif;
+        --mono: "JetBrains Mono", ui-monospace, monospace;
+        /* stem hues — content-justified data encoding */
+        --st-drums: #c6ff3d;
+        --st-bass: #ffb13d;
+        --st-vox: #ff5da2;
+        --st-mel: #6ec8ff;
+      }
+
+      /* ---- scene base ---- */
+      .scene {
+        position: absolute;
+        inset: 0;
+        width: 1920px;
+        height: 1080px;
+        background: var(--bg);
+        overflow: hidden;
+        font-family: "JetBrains Mono", ui-monospace, monospace;
+        color: var(--fg);
+      }
+      .scene::after {
+        content: "";
+        position: absolute;
+        inset: 0;
+        pointer-events: none;
+        mix-blend-mode: overlay;
+        opacity: 0.06;
+        background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.55'/%3E%3C/svg%3E");
+      }
+
+      /* ---- shared decoratives ---- */
+      .glow {
+        position: absolute;
+        border-radius: 50%;
+        filter: blur(8px);
+        pointer-events: none;
+      }
+      .ghost {
+        position: absolute;
+        font-family: "Archivo Black", sans-serif;
+        font-weight: 900;
+        color: var(--acc);
+        opacity: 0.05;
+        letter-spacing: -0.04em;
+        white-space: nowrap;
+        pointer-events: none;
+        line-height: 0.8;
+      }
+      .hairline { position: absolute; height: 2px; background: var(--line); }
+
+      /* ---- HUD ---- */
+      .hud-top, .hud-bot {
+        position: absolute;
+        left: 96px; right: 96px;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        font-size: 22px;
+        letter-spacing: 0.02em;
+        color: var(--dim);
+      }
+      .hud-top { top: 64px; }
+      .hud-bot { bottom: 64px; }
+      .hud-mark { color: var(--fg); font-weight: 700; letter-spacing: 0.08em; }
+      .reg { color: var(--acc); }
+
+      .step-no {
+        font-family: "Archivo Black", sans-serif;
+        font-weight: 900;
+        color: var(--acc);
+        font-size: 28px;
+        letter-spacing: 0.04em;
+      }
+      .term {
+        font-family: "JetBrains Mono", ui-monospace, monospace;
+        font-size: 28px;
+        color: var(--fg);
+      }
+      .term .pfx { color: var(--acc); }
+      .term .arg { color: var(--dim); }
+      .term-note { color: var(--acc-deep); }
+
+      .kicker {
+        font-family: "JetBrains Mono", ui-monospace, monospace;
+        font-size: 24px;
+        letter-spacing: 0.42em;
+        text-transform: uppercase;
+        color: var(--acc);
+      }
+      .headline {
+        font-family: "Archivo Black", sans-serif;
+        font-weight: 900;
+        letter-spacing: -0.02em;
+        line-height: 0.86;
+        color: var(--fg);
+      }
+      .tabnum { font-variant-numeric: tabular-nums; }
+
+      /* =========================================================
+         SCENE 0 — HOOK
+      ========================================================= */
+      #hook .content {
+        position: absolute;
+        left: 96px;
+        top: 0; bottom: 0;
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+        gap: 30px;
+      }
+      #hook .wordmark {
+        font-family: "Archivo Black", sans-serif;
+        font-weight: 900;
+        font-size: 440px;
+        line-height: 0.74;
+        letter-spacing: -0.05em;
+        color: var(--fg);
+        display: flex;
+        align-items: flex-end;
+      }
+      #hook .caret {
+        display: inline-block;
+        width: 64px; height: 300px;
+        background: var(--acc);
+        margin-left: 28px; margin-bottom: 36px;
+        box-shadow: 0 0 60px rgba(198,255,61,0.45);
+      }
+      #hook .h-kicker { font-family: "JetBrains Mono", ui-monospace, monospace; font-size: 30px; letter-spacing: 0.5em; text-transform: uppercase; color: var(--acc); }
+      #hook .h-tag { font-family: "JetBrains Mono", ui-monospace, monospace; font-size: 40px; color: var(--dim); letter-spacing: 0.02em; }
+      #hook .wave {
+        position: absolute;
+        left: -120px; bottom: 70px;
+        width: 2400px; height: 320px;
+        display: flex; align-items: flex-end; gap: 10px;
+        opacity: 0.16;
+        pointer-events: none;
+      }
+      #hook .wave span { flex: 1; background: var(--acc); border-radius: 3px; }
+
+      /* =========================================================
+         SCENE 1 — SYNC
+      ========================================================= */
+      #sync .stage {
+        position: absolute;
+        left: 96px; right: 96px; top: 250px; bottom: 200px;
+        display: grid;
+        grid-template-columns: 560px 1fr 560px;
+        align-items: center;
+        gap: 60px;
+      }
+      .sources { display: flex; flex-direction: column; gap: 26px; }
+      .src {
+        display: flex; align-items: center; justify-content: space-between;
+        padding: 26px 34px;
+        background: var(--panel);
+        border: 2px solid var(--line);
+        border-radius: 14px;
+      }
+      .src .name { font-size: 34px; font-weight: 500; color: var(--fg); letter-spacing: 0.01em; }
+      .src .cnt { font-size: 28px; color: var(--dim); }
+      .src .dot { width: 16px; height: 16px; border-radius: 50%; background: var(--acc); margin-right: 22px; box-shadow: 0 0 18px rgba(198,255,61,0.6); }
+      .src .row { display: flex; align-items: center; }
+
+      .flow { position: relative; height: 100%; }
+      .flow .ln { position: absolute; left: 0; right: 0; height: 3px; background: linear-gradient(90deg, rgba(198,255,61,0) 0%, var(--acc) 100%); transform-origin: left center; }
+      .flow .ln.l1 { top: 28%; }
+      .flow .ln.l2 { top: 50%; }
+      .flow .ln.l3 { top: 72%; }
+
+      .libpanel {
+        background: var(--panel);
+        border: 2px solid var(--acc-deep);
+        border-radius: 18px;
+        padding: 52px 48px;
+        box-shadow: 0 0 80px rgba(198,255,61,0.10);
+        position: relative;
+        overflow: hidden;
+      }
+      .libpanel .lab { font-size: 24px; letter-spacing: 0.3em; text-transform: uppercase; color: var(--acc); }
+      .libpanel .num { font-family: "Archivo Black", sans-serif; font-weight: 900; font-size: 168px; line-height: 0.9; color: var(--fg); letter-spacing: -0.03em; }
+      .libpanel .sub { font-size: 28px; color: var(--dim); margin-top: 8px; }
+      .scan { position: absolute; inset: 0; background: repeating-linear-gradient(0deg, rgba(198,255,61,0.05) 0 2px, transparent 2px 26px); pointer-events: none; }
+
+      /* =========================================================
+         SCENE 2 — DETECT
+      ========================================================= */
+      #detect .stage {
+        position: absolute;
+        left: 96px; right: 96px; top: 250px; bottom: 200px;
+        display: grid;
+        grid-template-columns: 640px 1fr;
+        gap: 80px;
+        align-items: center;
+      }
+      .scan-card { display: flex; flex-direction: column; gap: 34px; }
+      .linkbar {
+        display: flex; align-items: center; gap: 22px;
+        padding: 30px 34px;
+        background: var(--panel);
+        border: 2px solid var(--line);
+        border-radius: 14px;
+        font-size: 30px; color: var(--fg);
+        overflow: hidden;
+      }
+      .linkbar .tag { color: var(--acc); }
+      .srctags { display: flex; gap: 16px; flex-wrap: wrap; }
+      .srctags span {
+        font-size: 24px; color: var(--dim);
+        border: 2px solid var(--line); border-radius: 999px;
+        padding: 10px 22px;
+      }
+      .ring {
+        width: 132px; height: 132px; border-radius: 50%;
+        border: 4px solid var(--acc);
+        align-self: flex-start;
+        position: relative;
+        box-shadow: 0 0 50px rgba(198,255,61,0.3);
+      }
+      .ring::after { content: "♪"; position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; font-size: 56px; color: var(--acc); }
+
+      .tracklist { display: flex; flex-direction: column; gap: 16px; }
+      .trow {
+        display: flex; align-items: center; gap: 24px;
+        padding: 22px 30px;
+        background: var(--panel);
+        border-left: 4px solid var(--acc);
+        border-radius: 8px;
+      }
+      .trow .idx { font-size: 24px; color: var(--dim); width: 44px; }
+      .trow .nm { font-size: 32px; color: var(--fg); flex: 1; font-weight: 500; }
+      .trow .ck { font-size: 24px; color: var(--acc); letter-spacing: 0.1em; }
+
+      /* =========================================================
+         SCENE 3 — ENRICH (peak)
+      ========================================================= */
+      #enrich .stage {
+        position: absolute;
+        left: 96px; right: 96px; top: 250px; bottom: 190px;
+        display: grid;
+        grid-template-columns: 660px 1fr;
+        gap: 70px;
+        align-items: stretch;
+      }
+      .trackcard {
+        background: var(--panel);
+        border: 2px solid var(--line);
+        border-radius: 18px;
+        padding: 44px;
+        display: flex; flex-direction: column; gap: 30px;
+      }
+      .trackcard .top { display: flex; gap: 30px; align-items: center; }
+      .art {
+        width: 150px; height: 150px; border-radius: 12px;
+        background: radial-gradient(circle at 30% 30%, var(--acc-deep), #1c2615 70%);
+        flex: none; position: relative; overflow: hidden;
+      }
+      .art::after { content: ""; position: absolute; inset: 0; background: repeating-linear-gradient(135deg, rgba(0,0,0,0.25) 0 8px, transparent 8px 18px); }
+      .trackcard .t-title { font-family: "Archivo Black", sans-serif; font-weight: 900; font-size: 56px; line-height: 0.9; color: var(--fg); letter-spacing: -0.02em; }
+      .trackcard .t-art { font-size: 30px; color: var(--dim); margin-top: 8px; }
+      .metagrid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 22px 26px; }
+      .mcell .k { font-size: 20px; letter-spacing: 0.18em; text-transform: uppercase; color: var(--dim); }
+      .mcell .v { font-size: 38px; color: var(--fg); font-weight: 500; margin-top: 4px; }
+      .mcell .v.acc { color: var(--acc); }
+
+      .analysis {
+        background: var(--panel);
+        border: 2px solid var(--line);
+        border-radius: 18px;
+        padding: 40px 44px;
+        display: flex; flex-direction: column; gap: 26px;
+        position: relative;
+      }
+      .an-head { display: flex; align-items: baseline; justify-content: space-between; }
+      .an-head .lab { font-size: 24px; letter-spacing: 0.24em; text-transform: uppercase; color: var(--acc); }
+      .nrg { display: flex; align-items: baseline; gap: 14px; }
+      .nrg .n { font-family: "Archivo Black", sans-serif; font-weight: 900; font-size: 92px; color: var(--acc); line-height: 0.8; }
+      .nrg .u { font-size: 24px; color: var(--dim); letter-spacing: 0.1em; }
+      .curvewrap { width: 100%; height: 190px; position: relative; }
+      .stems { display: flex; flex-direction: column; gap: 18px; }
+      .stem { display: flex; align-items: center; gap: 22px; }
+      .stem .lbl { width: 150px; font-size: 24px; letter-spacing: 0.08em; color: var(--fg); text-transform: uppercase; }
+      .stem .track { flex: 1; height: 22px; background: #0c1109; border-radius: 999px; overflow: hidden; position: relative; }
+      .stem .fill { position: absolute; inset: 0; transform-origin: left center; border-radius: 999px; }
+      .stem .glow2 { position: absolute; inset: 0; border-radius: 999px; }
+      .stem .val { width: 70px; text-align: right; font-size: 24px; color: var(--dim); }
+
+      /* =========================================================
+         SCENE 4 — SET BUILDER (energy curve)
+      ========================================================= */
+      #set .stage {
+        position: absolute;
+        left: 96px; right: 96px; top: 250px; bottom: 175px;
+        display: grid; grid-template-columns: 600px 1fr; gap: 64px; align-items: stretch;
+      }
+      /* left — archetype + gather + search */
+      #set .arche {
+        background: var(--panel); border: 2px solid var(--line); border-radius: 18px;
+        padding: 44px; display: flex; flex-direction: column; gap: 30px;
+      }
+      #set .arche .lab { font-size: 22px; letter-spacing: 0.28em; text-transform: uppercase; color: var(--acc); }
+      #set .arche .aname { font-family: "Archivo Black", sans-serif; font-weight: 900; font-size: 78px; line-height: 0.84; color: var(--fg); letter-spacing: -0.02em; }
+      #set .arche .aname .u { color: var(--acc); }
+      #set .pgrid { display: grid; grid-template-columns: 1fr 1fr; gap: 24px 30px; }
+      #set .pcell .k { font-size: 19px; letter-spacing: 0.16em; text-transform: uppercase; color: var(--dim); }
+      #set .pcell .v { font-size: 34px; color: var(--fg); font-weight: 500; margin-top: 5px; }
+      #set .pcell .v.acc { color: var(--acc); }
+      #set .pool {
+        margin-top: auto; padding-top: 28px; border-top: 2px solid var(--line);
+        display: flex; flex-direction: column; gap: 4px;
+      }
+      #set .pool .pn { font-family: "Archivo Black", sans-serif; font-weight: 900; font-size: 70px; color: var(--acc); line-height: 0.9; letter-spacing: -0.02em; }
+      #set .pool .ps { font-size: 23px; color: var(--dim); }
+      /* right — the set graph */
+      #set .graph {
+        background: var(--panel); border: 2px solid var(--acc-deep); border-radius: 18px;
+        padding: 36px 42px 28px; display: flex; flex-direction: column; gap: 16px; position: relative; overflow: hidden;
+        box-shadow: 0 0 80px rgba(198,255,61,0.10);
+      }
+      #set .graph .ghead { display: flex; align-items: baseline; justify-content: space-between; }
+      #set .graph .ghead .lab { font-size: 22px; letter-spacing: 0.24em; text-transform: uppercase; color: var(--acc); }
+      #set .graph .ghead .axis { font-size: 20px; color: var(--dim); letter-spacing: 0.05em; }
+      #set .gwrap { flex: 1; position: relative; min-height: 0; }
+      #set .gwrap svg { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+      #set .gwrap .snode {
+        position: absolute; width: 20px; height: 20px; border-radius: 50%;
+        background: var(--acc); border: 3px solid #0d120b;
+        box-shadow: 0 0 16px rgba(198,255,61,0.7);
+      }
+      #set .gwrap .snode.peak { width: 30px; height: 30px; box-shadow: 0 0 24px rgba(198,255,61,0.95); }
+      #set .phaselab { display: flex; justify-content: space-between; font-size: 19px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--dim); padding: 0 2px; }
+      #set .phaselab span.on { color: var(--acc); }
+
+      /* =========================================================
+         SCENE 5 — EXTENSION (1001TL PiP)
+      ========================================================= */
+      #ext .stage {
+        position: absolute;
+        left: 96px; right: 96px; top: 250px; bottom: 170px;
+        display: grid; grid-template-columns: 600px 1fr; gap: 70px; align-items: center;
+      }
+      #ext .left { display: flex; flex-direction: column; gap: 38px; }
+      #ext .ext-sub { font-size: 32px; line-height: 1.45; color: var(--dim); max-width: 540px; }
+      #ext .ext-sub b { color: var(--fg); font-weight: 500; }
+      #ext .kbd {
+        display: inline-flex; align-items: center; gap: 18px; align-self: flex-start;
+        padding: 18px 30px; border: 2px solid var(--line); border-radius: 12px;
+        background: var(--panel); font-size: 26px; color: var(--dim);
+      }
+      #ext .kbd .keys { color: var(--acc); font-weight: 700; letter-spacing: 0.08em; }
+      /* faint "you're working" backdrop */
+      #ext .work { position: absolute; inset: 0; opacity: 0; filter: blur(1px); pointer-events: none; }
+      #ext .work .wl { position: absolute; height: 12px; background: var(--fg); border-radius: 4px; }
+      /* floating PiP window */
+      #ext .pip-wrap { justify-self: end; }
+      #ext .pip {
+        width: 820px; background: #0d120b; border: 2px solid var(--line); border-radius: 18px; overflow: hidden;
+        box-shadow: 0 40px 120px rgba(0,0,0,0.6), 0 0 0 1px rgba(198,255,61,0.18), 0 0 70px rgba(198,255,61,0.12);
+      }
+      #ext .pip-bar { display: flex; align-items: center; gap: 12px; padding: 16px 24px; background: #11160f; border-bottom: 2px solid var(--line); font-size: 22px; color: var(--dim); }
+      #ext .pip-bar .ttl { color: var(--acc); letter-spacing: 0.06em; }
+      #ext .pip-bar .dots { margin-left: auto; display: flex; gap: 9px; }
+      #ext .pip-bar .dots i { width: 12px; height: 12px; border-radius: 50%; background: var(--line); display: block; }
+      #ext .video { position: relative; height: 268px; background: radial-gradient(circle at 68% 22%, rgba(198,255,61,0.20), #0a0d0c 70%); overflow: hidden; }
+      #ext .video .vwave { position: absolute; inset: 0; display: flex; align-items: flex-end; gap: 6px; padding: 26px; opacity: 0.5; }
+      #ext .video .vwave span { flex: 1; background: var(--acc); border-radius: 2px; transform-origin: bottom; }
+      #ext .video .play, #ext .video .pulse { position: absolute; left: calc(50% - 48px); top: calc(42% - 48px); width: 96px; height: 96px; border-radius: 50%; }
+      #ext .video .play { background: rgba(198,255,61,0.16); border: 3px solid var(--acc); display: flex; align-items: center; justify-content: center; }
+      #ext .video .play::after { content: "\25B6"; color: var(--acc); font-size: 38px; margin-left: 6px; }
+      #ext .video .pulse { border: 3px solid var(--acc); opacity: 0; }
+      #ext .video .setname { position: absolute; left: 26px; bottom: 58px; font-size: 26px; color: var(--fg); font-weight: 500; text-shadow: 0 2px 14px #000; }
+      #ext .video .scrub { position: absolute; left: 26px; right: 26px; bottom: 40px; height: 5px; background: rgba(255,255,255,0.16); border-radius: 999px; overflow: hidden; }
+      #ext .video .scrub .fill { position: absolute; inset: 0; background: var(--acc); transform-origin: left center; }
+      #ext .video .time { position: absolute; right: 26px; bottom: 14px; font-size: 20px; color: var(--dim); }
+      #ext .tl { padding: 8px 0 12px; }
+      #ext .tl .thead, #ext .tl .trow2 { display: grid; grid-template-columns: 48px 104px 1fr 1fr; gap: 12px; align-items: center; padding: 13px 24px; }
+      #ext .tl .thead > *, #ext .tl .trow2 > * { min-width: 0; }
+      #ext .tl .ar, #ext .tl .tkn { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+      #ext .tl .thead { font-size: 18px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--dim); }
+      #ext .tl .trow2 { font-size: 21px; color: var(--fg); border-top: 1px solid #141a11; }
+      #ext .tl .trow2 .ti, #ext .tl .trow2 .ar { color: var(--dim); }
+      #ext .tl .trow2 .ti { font-variant-numeric: tabular-nums; }
+      #ext .tl .trow2.active { background: rgba(198,255,61,0.13); }
+      #ext .tl .trow2.active .ti, #ext .tl .trow2.active .ar, #ext .tl .trow2.active .tkn { color: var(--fg); }
+      #ext .tl .now { color: var(--acc); font-size: 22px; font-weight: 700; }
+
+      /* =========================================================
+         SCENE 6 — OUTRO
+      ========================================================= */
+      #outro .content {
+        position: absolute; inset: 0;
+        display: flex; flex-direction: column;
+        align-items: center; justify-content: center;
+        gap: 36px;
+      }
+      #outro .o-line { font-family: "JetBrains Mono", ui-monospace, monospace; font-size: 34px; letter-spacing: 0.06em; color: var(--dim); }
+      #outro .dests { display: flex; gap: 22px; }
+      #outro .dests span {
+        font-size: 28px; color: var(--acc); letter-spacing: 0.01em;
+        border: 2px solid var(--line); border-radius: 999px;
+        padding: 16px 34px;
+        background: var(--panel);
+      }
+      #outro .o-mark { font-family: "Archivo Black", sans-serif; font-weight: 900; font-size: 360px; line-height: 0.78; letter-spacing: -0.05em; color: var(--fg); }
+      #outro .o-tag { font-family: "JetBrains Mono", ui-monospace, monospace; font-size: 36px; color: var(--acc); letter-spacing: 0.04em; }
+      #outro .o-term { font-family: "JetBrains Mono", ui-monospace, monospace; font-size: 28px; color: var(--dim); }
+      #outro .o-term .pfx { color: var(--acc); }
+    </style>
+  </head>
+  <body>
+    <div
+      id="root"
+      data-composition-id="main"
+      data-start="0"
+      data-duration="36.5"
+      data-width="1920"
+      data-height="1080"
+    >
+      <!-- ============================ SCENE 0 — HOOK ============================ -->
+      <div id="hook" class="scene clip" data-start="0" data-duration="4.0" data-track-index="0" style="z-index: 1">
+        <div class="glow" data-layout-allow-overflow id="hk-glow" style="width: 1100px; height: 1100px; left: 760px; top: -260px; background: radial-gradient(circle, rgba(198,255,61,0.16), rgba(198,255,61,0) 62%);"></div>
+        <div class="ghost" id="hk-ghost" style="right: -60px; bottom: -120px; font-size: 720px;">CRATE</div>
+        <div class="wave" id="hk-wave">
+          <span style="height: 38%"></span><span style="height: 70%"></span><span style="height: 22%"></span>
+          <span style="height: 85%"></span><span style="height: 50%"></span><span style="height: 95%"></span>
+          <span style="height: 33%"></span><span style="height: 64%"></span><span style="height: 18%"></span>
+          <span style="height: 78%"></span><span style="height: 44%"></span><span style="height: 90%"></span>
+          <span style="height: 28%"></span><span style="height: 60%"></span><span style="height: 40%"></span>
+          <span style="height: 82%"></span><span style="height: 24%"></span><span style="height: 72%"></span>
+          <span style="height: 52%"></span><span style="height: 88%"></span><span style="height: 30%"></span>
+          <span style="height: 66%"></span><span style="height: 46%"></span><span style="height: 94%"></span>
+          <span style="height: 36%"></span><span style="height: 76%"></span><span style="height: 20%"></span>
+          <span style="height: 58%"></span><span style="height: 48%"></span><span style="height: 84%"></span>
+          <span style="height: 26%"></span><span style="height: 68%"></span>
+        </div>
+
+        <div class="hud-top">
+          <span><span class="hud-mark">~/Music/dj</span></span>
+          <span class="reg" id="hk-ver">v0.1.6</span>
+        </div>
+
+        <div class="content">
+          <div class="h-kicker" id="hk-kick">one tool · your whole crate</div>
+          <div class="wordmark"><span id="hk-dj">dj</span><span class="caret" id="hk-caret"></span></div>
+          <div class="h-tag" id="hk-tag">the unified DJ tool</div>
+        </div>
+
+        <div class="hud-bot">
+          <span id="hk-prompt"><span class="reg">$</span> _</span>
+          <span id="hk-meta">sync · detect · enrich · build</span>
+        </div>
+      </div>
+
+      <!-- ============================ SCENE 1 — SYNC ============================ -->
+      <div id="sync" class="scene clip" data-start="3.6" data-duration="5.4" data-track-index="1" style="z-index: 2">
+        <div class="glow" data-layout-allow-overflow style="width: 900px; height: 900px; right: -160px; top: -200px; background: radial-gradient(circle, rgba(198,255,61,0.12), rgba(198,255,61,0) 65%);"></div>
+        <div class="ghost" style="left: 60px; bottom: -160px; font-size: 560px;">SYNC</div>
+
+        <div class="hud-top">
+          <span><span class="step-no" id="sy-no">01</span> &nbsp;<span class="hud-mark">SYNC</span></span>
+          <span class="reg">capture everything</span>
+        </div>
+
+        <div class="headline" id="sy-head" style="position: absolute; left: 96px; top: 132px; font-size: 96px;">capture<br />everything.</div>
+
+        <div class="stage">
+          <div class="sources">
+            <div class="src" id="sy-s1"><div class="row"><div class="dot"></div><div class="name">Apple Music</div></div><div class="cnt">2,140</div></div>
+            <div class="src" id="sy-s2"><div class="row"><div class="dot"></div><div class="name">Spotify</div></div><div class="cnt">1,896</div></div>
+            <div class="src" id="sy-s3"><div class="row"><div class="dot"></div><div class="name">Beatport</div></div><div class="cnt">776</div></div>
+          </div>
+          <div class="flow">
+            <div class="ln l1" id="sy-l1"></div>
+            <div class="ln l2" id="sy-l2"></div>
+            <div class="ln l3" id="sy-l3"></div>
+          </div>
+          <div class="libpanel" id="sy-lib">
+            <div class="scan"></div>
+            <div class="lab">your library</div>
+            <div class="num tabnum" id="sy-count">0</div>
+            <div class="sub">tracks captured · 0 lost</div>
+          </div>
+        </div>
+
+        <div class="hud-bot">
+          <span class="term"><span class="pfx">$</span> dj sync music pull <span class="arg">--all</span></span>
+          <span class="term-note">non-destructive · dj.db is the backup</span>
+        </div>
+      </div>
+
+      <!-- ============================ SCENE 2 — DETECT ============================ -->
+      <div id="detect" class="scene clip" data-start="8.6" data-duration="5.4" data-track-index="0" style="z-index: 3">
+        <div class="glow" data-layout-allow-overflow style="width: 820px; height: 820px; left: 120px; top: 320px; background: radial-gradient(circle, rgba(198,255,61,0.10), rgba(198,255,61,0) 65%);"></div>
+        <div class="ghost" style="right: -40px; top: -120px; font-size: 520px;">DETECT</div>
+
+        <div class="hud-top">
+          <span><span class="step-no" id="dt-no">02</span> &nbsp;<span class="hud-mark">DETECT</span></span>
+          <span class="reg">find tracks anywhere</span>
+        </div>
+
+        <div class="headline" id="dt-head" style="position: absolute; left: 96px; top: 132px; font-size: 96px;">find tracks<br />anywhere.</div>
+
+        <div class="stage">
+          <div class="scan-card">
+            <div class="linkbar" id="dt-link"><span class="tag">▸</span> youtube.com/watch?v=<span id="dt-id">aL9x2…</span></div>
+            <div class="srctags" id="dt-tags">
+              <span>YouTube</span><span>SoundCloud</span><span>Radio</span><span>1001Tracklists</span><span>Instagram</span>
+            </div>
+            <div class="ring" id="dt-ring"></div>
+            <div style="font-size: 26px; color: var(--dim);" id="dt-gem">+ <span style="color: var(--acc)">detect gems</span> — low-play discovery</div>
+          </div>
+          <div class="tracklist">
+            <div class="trow" id="dt-r1"><span class="idx tabnum">01</span><span class="nm">Dennis Cruz — El Sueño</span><span class="ck">ID'd</span></div>
+            <div class="trow" id="dt-r2"><span class="idx tabnum">02</span><span class="nm">Cloonee — Be Alright</span><span class="ck">ID'd</span></div>
+            <div class="trow" id="dt-r3"><span class="idx tabnum">03</span><span class="nm">Marco Lys — La Pasion</span><span class="ck">ID'd</span></div>
+            <div class="trow" id="dt-r4"><span class="idx tabnum">04</span><span class="nm">HoSk — Outta My Head</span><span class="ck">ID'd</span></div>
+            <div class="trow" id="dt-r5"><span class="idx tabnum">05</span><span class="nm">Sosa UK — Mind Control</span><span class="ck">ID'd</span></div>
+          </div>
+        </div>
+
+        <div class="hud-bot">
+          <span class="term"><span class="pfx">$</span> dj detect youtube <span class="arg">&lt;url&gt;</span></span>
+          <span class="term-note">Shazam-based recognition → detected_tracks</span>
+        </div>
+      </div>
+
+      <!-- ============================ SCENE 3 — ENRICH (peak) ============================ -->
+      <div id="enrich" class="scene clip" data-start="13.6" data-duration="6.4" data-track-index="1" style="z-index: 4">
+        <div class="glow" data-layout-allow-overflow style="width: 1000px; height: 1000px; right: -200px; bottom: -260px; background: radial-gradient(circle, rgba(198,255,61,0.15), rgba(198,255,61,0) 62%);"></div>
+        <div class="ghost" style="left: -40px; bottom: -150px; font-size: 540px;">ENRICH</div>
+
+        <div class="hud-top">
+          <span><span class="step-no" id="en-no">03</span> &nbsp;<span class="hud-mark">ENRICH</span></span>
+          <span class="reg">fully analysed</span>
+        </div>
+
+        <div class="headline" id="en-head" style="position: absolute; left: 96px; top: 132px; font-size: 96px;">fully analysed.</div>
+
+        <div class="stage">
+          <div class="trackcard" id="en-card">
+            <div class="top">
+              <div class="art" id="en-art"></div>
+              <div>
+                <div class="t-title">El Sueño</div>
+                <div class="t-art">Dennis Cruz</div>
+              </div>
+            </div>
+            <div class="metagrid">
+              <div class="mcell en-m"><div class="k">Label</div><div class="v">Solid Grooves</div></div>
+              <div class="mcell en-m"><div class="k">Key</div><div class="v acc">8A</div></div>
+              <div class="mcell en-m"><div class="k">BPM</div><div class="v tabnum">124</div></div>
+              <div class="mcell en-m"><div class="k">Genre</div><div class="v">Tech House</div></div>
+              <div class="mcell en-m"><div class="k">Length</div><div class="v tabnum">6:42</div></div>
+              <div class="mcell en-m"><div class="k">ISRC</div><div class="v" style="font-size: 30px">GB-X12…</div></div>
+            </div>
+          </div>
+
+          <div class="analysis">
+            <div class="an-head">
+              <span class="lab">energy + stems</span>
+              <div class="nrg"><span class="n tabnum" id="en-nrg">0</span><span class="u">MIK NRG</span></div>
+            </div>
+            <div class="curvewrap">
+              <svg id="en-svg" width="100%" height="190" viewBox="0 0 760 190" preserveAspectRatio="none">
+                <defs>
+                  <linearGradient id="enArea" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="0%" stop-color="rgba(198,255,61,0.32)" />
+                    <stop offset="100%" stop-color="rgba(198,255,61,0)" />
+                  </linearGradient>
+                </defs>
+                <path id="en-area" d="M0,150 C70,120 110,60 180,70 C250,80 280,150 360,140 C440,130 470,40 560,48 C650,56 690,110 760,96 L760,190 L0,190 Z" fill="url(#enArea)" opacity="0" />
+                <path id="en-line" d="M0,150 C70,120 110,60 180,70 C250,80 280,150 360,140 C440,130 470,40 560,48 C650,56 690,110 760,96" fill="none" stroke="#c6ff3d" stroke-width="4" stroke-linecap="round" />
+              </svg>
+            </div>
+            <div class="stems">
+              <div class="stem"><span class="lbl">Drums</span><span class="track"><span class="fill en-fill" data-w="0.88" style="background: var(--st-drums)"></span><span class="glow2 en-glow" style="background: var(--st-drums)"></span></span><span class="val tabnum">88</span></div>
+              <div class="stem"><span class="lbl">Bass</span><span class="track"><span class="fill en-fill" data-w="0.74" style="background: var(--st-bass)"></span><span class="glow2 en-glow" style="background: var(--st-bass)"></span></span><span class="val tabnum">74</span></div>
+              <div class="stem"><span class="lbl">Vocals</span><span class="track"><span class="fill en-fill" data-w="0.41" style="background: var(--st-vox)"></span><span class="glow2 en-glow" style="background: var(--st-vox)"></span></span><span class="val tabnum">41</span></div>
+              <div class="stem"><span class="lbl">Melody</span><span class="track"><span class="fill en-fill" data-w="0.63" style="background: var(--st-mel)"></span><span class="glow2 en-glow" style="background: var(--st-mel)"></span></span><span class="val tabnum">63</span></div>
+            </div>
+          </div>
+        </div>
+
+        <div class="hud-bot">
+          <span class="term"><span class="pfx">$</span> dj enrich metadata <span class="arg">&amp;&amp;</span> dj enrich analyse</span>
+          <span class="term-note">Beatport meta + DJ&nbsp;Studio stem analysis</span>
+        </div>
+      </div>
+
+      <!-- ============================ SCENE 4 — SET BUILDER ============================ -->
+      <div id="set" class="scene clip" data-start="19.6" data-duration="7.4" data-track-index="0" style="z-index: 5">
+        <div class="glow" data-layout-allow-overflow style="width: 1000px; height: 1000px; right: -200px; top: -240px; background: radial-gradient(circle, rgba(198,255,61,0.13), rgba(198,255,61,0) 63%);"></div>
+        <div class="ghost" style="left: -40px; bottom: -150px; font-size: 540px;">CURVE</div>
+
+        <div class="hud-top">
+          <span><span class="step-no" id="set-no">04</span> &nbsp;<span class="hud-mark">SET BUILDER</span></span>
+          <span class="reg">energy-sequenced</span>
+        </div>
+
+        <div class="headline" id="set-head" style="position: absolute; left: 96px; top: 132px; font-size: 96px;">build the set.</div>
+
+        <div class="stage">
+          <div class="arche" id="set-arche">
+            <div class="lab">archetype</div>
+            <div class="aname">club<br /><span class="u">night</span></div>
+            <div class="pgrid">
+              <div class="pcell sp"><div class="k">Duration</div><div class="v tabnum">120 min</div></div>
+              <div class="pcell sp"><div class="k">Tracks</div><div class="v tabnum acc">24</div></div>
+              <div class="pcell sp"><div class="k">Genres</div><div class="v" style="font-size: 25px">House · Tech House</div></div>
+              <div class="pcell sp"><div class="k">BPM window</div><div class="v tabnum">122–128</div></div>
+            </div>
+            <div class="pool">
+              <div class="pn tabnum" id="set-pool">0</div>
+              <div class="ps">analysed tracks scored &amp; sequenced</div>
+            </div>
+          </div>
+
+          <div class="graph" id="set-graph">
+            <div class="ghead"><span class="lab">set curve</span><span class="axis">intensity 1 → 10 · club_night</span></div>
+            <div class="gwrap">
+              <svg id="set-svg" viewBox="0 0 1180 360" preserveAspectRatio="none">
+                <defs>
+                  <linearGradient id="setArea" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="0%" stop-color="rgba(198,255,61,0.30)" />
+                    <stop offset="100%" stop-color="rgba(198,255,61,0)" />
+                  </linearGradient>
+                </defs>
+                <g stroke="#1f2a1d" stroke-width="1.5">
+                  <line x1="0" y1="72" x2="1180" y2="72" />
+                  <line x1="0" y1="158" x2="1180" y2="158" />
+                  <line x1="0" y1="244" x2="1180" y2="244" />
+                  <line x1="0" y1="330" x2="1180" y2="330" />
+                </g>
+                <path id="set-area" d="M0,266 C60,230 90,205 118,201 C170,194 200,165 236,169 C280,174 300,217 330,217 C400,217 470,160 531,137 C580,118 610,104 649,104 C700,104 730,150 767,153 C830,158 870,100 920,88 C980,74 1020,73 1062,72 C1110,71 1150,55 1180,40 L1180,360 L0,360 Z" fill="url(#setArea)" opacity="0" />
+                <path id="set-line" d="M0,266 C60,230 90,205 118,201 C170,194 200,165 236,169 C280,174 300,217 330,217 C400,217 470,160 531,137 C580,118 610,104 649,104 C700,104 730,150 767,153 C830,158 870,100 920,88 C980,74 1020,73 1062,72 C1110,71 1150,55 1180,40" fill="none" stroke="#c6ff3d" stroke-width="4" stroke-linecap="round" stroke-linejoin="round" />
+              </svg>
+              <div class="snode" style="left: 10.0%; top: 55.8%"></div>
+              <div class="snode" style="left: 20.0%; top: 46.9%"></div>
+              <div class="snode" style="left: 27.9%; top: 60.3%"></div>
+              <div class="snode" style="left: 45.0%; top: 38.1%"></div>
+              <div class="snode" style="left: 55.0%; top: 28.9%"></div>
+              <div class="snode" style="left: 65.0%; top: 42.5%"></div>
+              <div class="snode" style="left: 78.0%; top: 24.4%"></div>
+              <div class="snode" style="left: 90.0%; top: 20.0%"></div>
+              <div class="snode peak" id="set-climax" style="left: 97.0%; top: 12.5%"></div>
+            </div>
+            <div class="phaselab">
+              <span>warm-up</span><span>build</span><span>peak</span><span>dip</span><span class="on">climax</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="hud-bot">
+          <span class="term"><span class="pfx">$</span> dj set build <span class="arg">--archetype club_night --duration 120</span> --save</span>
+          <span class="term-note">intensity curve → energy-sequenced set</span>
+        </div>
+      </div>
+
+      <!-- ============================ SCENE 5 — EXTENSION (1001TL PiP) ============================ -->
+      <div id="ext" class="scene clip" data-start="26.6" data-duration="5.8" data-track-index="1" style="z-index: 6">
+        <div class="glow" data-layout-allow-overflow style="width: 900px; height: 900px; right: -180px; top: -220px; background: radial-gradient(circle, rgba(198,255,61,0.12), rgba(198,255,61,0) 65%);"></div>
+        <div class="ghost" style="left: 40px; bottom: -150px; font-size: 540px;">PiP</div>
+
+        <div class="work" id="ext-work">
+          <div class="wl" style="left: 96px; top: 205px; width: 520px;"></div>
+          <div class="wl" style="left: 96px; top: 245px; width: 360px;"></div>
+          <div class="wl" style="left: 96px; top: 320px; width: 600px;"></div>
+          <div class="wl" style="left: 96px; top: 360px; width: 300px;"></div>
+          <div class="wl" style="left: 96px; top: 760px; width: 540px;"></div>
+          <div class="wl" style="left: 96px; top: 800px; width: 340px;"></div>
+          <div class="wl" style="right: 130px; top: 880px; width: 420px;"></div>
+        </div>
+
+        <div class="hud-top">
+          <span><span class="step-no" id="ext-no">+</span> &nbsp;<span class="hud-mark">EXTENSION</span></span>
+          <span class="reg">listen while you work</span>
+        </div>
+
+        <div class="headline" id="ext-head" style="position: absolute; left: 96px; top: 132px; font-size: 96px;">listen while<br />you work.</div>
+
+        <div class="stage">
+          <div class="left">
+            <div class="ext-sub" id="ext-sub">Float any <b>YouTube DJ set</b> in a picture-in-picture window with its <b>live 1001tracklists overlay</b> — the playing track lights up while you keep working.</div>
+            <div class="kbd" id="ext-kbd"><span class="keys">&#8984; &#8679; P</span> open PiP + tracklist</div>
+          </div>
+
+          <div class="pip-wrap" id="ext-pipwrap">
+            <div class="pip" id="ext-pip">
+              <div class="pip-bar"><span class="ttl">&#9834; 1001TL &middot; PiP</span><span class="dots"><i></i><i></i><i></i></span></div>
+              <div class="video">
+                <div class="vwave" id="ext-vwave">
+                  <span style="height: 30%"></span><span style="height: 62%"></span><span style="height: 45%"></span><span style="height: 80%"></span><span style="height: 38%"></span><span style="height: 70%"></span><span style="height: 52%"></span><span style="height: 90%"></span><span style="height: 34%"></span><span style="height: 64%"></span><span style="height: 48%"></span><span style="height: 84%"></span><span style="height: 40%"></span><span style="height: 72%"></span><span style="height: 56%"></span><span style="height: 88%"></span><span style="height: 36%"></span><span style="height: 66%"></span><span style="height: 50%"></span><span style="height: 78%"></span><span style="height: 42%"></span><span style="height: 60%"></span>
+                </div>
+                <div class="pulse" id="ext-pulse"></div>
+                <div class="play" id="ext-play"></div>
+                <div class="setname">Drumcode @ Awakenings 2025</div>
+                <div class="scrub"><span class="fill" id="ext-scrub"></span></div>
+                <div class="time tabnum">47:55 / 1:58:20</div>
+              </div>
+              <div class="tl" data-layout-allow-overflow>
+                <div class="thead"><span>#</span><span>Time</span><span>Artist</span><span>Track</span></div>
+                <div class="trow2 ext-row"><span class="ti">06</span><span class="ti">41:18</span><span class="ar">Boris Brejcha</span><span class="tkn">Gravity</span></div>
+                <div class="trow2 ext-row active"><span class="now" id="ext-now">&#9654;</span><span class="ti">47:52</span><span class="ar">Charlotte de Witte</span><span class="tkn">Doppler</span></div>
+                <div class="trow2 ext-row"><span class="ti">08</span><span class="ti">53:09</span><span class="ar">Amelie Lens</span><span class="tkn">In My Mind</span></div>
+                <div class="trow2 ext-row"><span class="ti">09</span><span class="ti">58:44</span><span class="ar">I Hate Models</span><span class="tkn">Daydream</span></div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="hud-bot">
+          <span class="term"><span class="pfx">$</span> dj extension pack 1001T</span>
+          <span class="term-note">PiP a YouTube set &middot; live 1001tracklists overlay</span>
+        </div>
+      </div>
+
+      <!-- ============================ SCENE 6 — OUTRO ============================ -->
+      <div id="outro" class="scene clip" data-start="32.0" data-duration="4.4" data-track-index="0" style="z-index: 7">
+        <div class="glow" data-layout-allow-overflow id="ou-glow" style="width: 1300px; height: 1300px; left: 310px; top: -360px; background: radial-gradient(circle, rgba(198,255,61,0.16), rgba(198,255,61,0) 60%);"></div>
+        <div class="ghost" style="left: 50%; top: 50%; transform: translate(-50%,-50%); font-size: 760px;">dj</div>
+
+        <div class="content">
+          <div class="o-line" id="ou-line">from crate → curated set</div>
+          <div class="dests" id="ou-dests">
+            <span>DJ Charts</span>
+            <span>Playlists</span>
+            <span>Rekordbox</span>
+          </div>
+          <div class="o-mark" id="ou-mark">dj</div>
+          <div class="o-tag" id="ou-tag">build the library once. play it everywhere.</div>
+          <div class="o-term" id="ou-term"><span class="pfx">$</span> dj export set 7 --to rekordbox</div>
+        </div>
+      </div>
+    </div>
+
+    <script>
+      window.__timelines = window.__timelines || {};
+      const tl = gsap.timeline({ paused: true });
+
+      const E = (s) => `power3.out`;
+      const fmt = (n) => Math.round(n).toLocaleString("en-US");
+
+      /* ============== SCENE 0 — HOOK (0 – 4.0) ============== */
+      // wordmark slams, caret blinks, supporting copy + ambient
+      tl.fromTo("#hk-dj", { opacity: 0, scale: 1.35, y: 30 }, { opacity: 1, scale: 1, y: 0, duration: 0.5, ease: "power4.out" }, 0.25);
+      tl.fromTo("#hk-caret", { opacity: 0, scaleY: 0, transformOrigin: "bottom center" }, { opacity: 1, scaleY: 1, duration: 0.3, ease: "back.out(2)" }, 0.55);
+      tl.fromTo("#hk-kick", { opacity: 0, x: -40, letterSpacing: "0.9em" }, { opacity: 1, x: 0, letterSpacing: "0.5em", duration: 0.7, ease: "expo.out" }, 0.15);
+      tl.fromTo("#hk-tag", { opacity: 0, y: 24 }, { opacity: 1, y: 0, duration: 0.6, ease: "power2.out" }, 0.7);
+      tl.fromTo("#hk-ver", { opacity: 0 }, { opacity: 1, duration: 0.5 }, 0.9);
+      tl.fromTo("#hk-prompt", { opacity: 0 }, { opacity: 1, duration: 0.4 }, 1.0);
+      tl.fromTo("#hk-meta", { opacity: 0 }, { opacity: 0.7, duration: 0.4 }, 1.1);
+      // caret blink (finite)
+      tl.to("#hk-caret", { opacity: 0.15, duration: 0.45, yoyo: true, repeat: 4, ease: "steps(1)" }, 1.0);
+      // ambient: glow breathe + waveform drift
+      tl.to("#hk-glow", { scale: 1.12, duration: 2.4, yoyo: true, repeat: 1, ease: "sine.inOut" }, 0.4);
+      tl.fromTo("#hk-wave", { x: -40, opacity: 0 }, { x: 40, opacity: 0.16, duration: 3.6, ease: "sine.inOut" }, 0.2);
+      tl.to("#hk-ghost", { x: -30, duration: 3.5, ease: "sine.inOut" }, 0.2);
+
+      /* ============== SCENE 1 — SYNC (3.6 – 9.0) ============== */
+      // transition IN: zoom-through
+      tl.fromTo("#sync", { opacity: 0, scale: 1.06, filter: "blur(8px)" }, { opacity: 1, scale: 1, filter: "blur(0px)", duration: 0.45, ease: "power3.out" }, 3.6);
+      tl.fromTo("#sy-no", { opacity: 0, scale: 1.4 }, { opacity: 1, scale: 1, duration: 0.35, ease: "back.out(2)" }, 3.85);
+      tl.fromTo("#sy-head", { opacity: 0, y: 40 }, { opacity: 1, y: 0, duration: 0.55, ease: "expo.out" }, 3.95);
+      // sources cascade from left
+      tl.fromTo("#sy-s1", { opacity: 0, x: -80 }, { opacity: 1, x: 0, duration: 0.45, ease: "power3.out" }, 4.2);
+      tl.fromTo("#sy-s2", { opacity: 0, x: -80 }, { opacity: 1, x: 0, duration: 0.45, ease: "power3.out" }, 4.32);
+      tl.fromTo("#sy-s3", { opacity: 0, x: -80 }, { opacity: 1, x: 0, duration: 0.45, ease: "power3.out" }, 4.44);
+      // flow lines draw
+      tl.fromTo("#sy-l1", { scaleX: 0 }, { scaleX: 1, duration: 0.5, ease: "power2.inOut" }, 4.6);
+      tl.fromTo("#sy-l2", { scaleX: 0 }, { scaleX: 1, duration: 0.5, ease: "power2.inOut" }, 4.7);
+      tl.fromTo("#sy-l3", { scaleX: 0 }, { scaleX: 1, duration: 0.5, ease: "power2.inOut" }, 4.8);
+      // library panel + count up
+      tl.fromTo("#sy-lib", { opacity: 0, x: 60 }, { opacity: 1, x: 0, duration: 0.5, ease: "power3.out" }, 4.65);
+      const libC = { v: 0 };
+      tl.to(libC, { v: 4812, duration: 1.6, ease: "power2.out", onUpdate: () => { document.getElementById("sy-count").textContent = fmt(libC.v); } }, 5.0);
+      // ambient pulse on library border glow
+      tl.to("#sy-lib", { boxShadow: "0 0 120px rgba(198,255,61,0.22)", duration: 1.4, yoyo: true, repeat: 1, ease: "sine.inOut" }, 6.6);
+
+      /* ============== SCENE 2 — DETECT (8.6 – 14.0) ============== */
+      tl.fromTo("#detect", { opacity: 0, scale: 1.06, filter: "blur(8px)" }, { opacity: 1, scale: 1, filter: "blur(0px)", duration: 0.45, ease: "power3.out" }, 8.6);
+      tl.fromTo("#dt-no", { opacity: 0, scale: 1.4 }, { opacity: 1, scale: 1, duration: 0.35, ease: "back.out(2)" }, 8.85);
+      tl.fromTo("#dt-head", { opacity: 0, y: 40 }, { opacity: 1, y: 0, duration: 0.55, ease: "expo.out" }, 8.95);
+      tl.fromTo("#dt-link", { opacity: 0, x: -60 }, { opacity: 1, x: 0, duration: 0.45, ease: "power3.out" }, 9.15);
+      tl.fromTo("#dt-tags span", { opacity: 0, y: 20 }, { opacity: 1, y: 0, duration: 0.35, ease: "power2.out", stagger: 0.06 }, 9.35);
+      tl.fromTo("#dt-ring", { opacity: 0, scale: 0.4 }, { opacity: 1, scale: 1, duration: 0.4, ease: "back.out(2.4)" }, 9.55);
+      tl.fromTo("#dt-gem", { opacity: 0 }, { opacity: 1, duration: 0.4 }, 9.8);
+      // recognition pulse (finite)
+      tl.to("#dt-ring", { scale: 1.12, duration: 0.55, yoyo: true, repeat: 5, ease: "sine.inOut" }, 10.05);
+      // tracklist rows stamp in
+      ["#dt-r1", "#dt-r2", "#dt-r3", "#dt-r4", "#dt-r5"].forEach((id, i) => {
+        tl.fromTo(id, { opacity: 0, x: 60 }, { opacity: 1, x: 0, duration: 0.4, ease: "power3.out" }, 9.7 + i * 0.16);
+        tl.fromTo(id + " .ck", { opacity: 0, scale: 0 }, { opacity: 1, scale: 1, duration: 0.3, ease: "back.out(3)" }, 9.95 + i * 0.16);
+      });
+
+      /* ============== SCENE 3 — ENRICH (13.6 – 20.0) — PEAK ============== */
+      tl.fromTo("#enrich", { opacity: 0, scale: 1.08, filter: "blur(10px)" }, { opacity: 1, scale: 1, filter: "blur(0px)", duration: 0.5, ease: "expo.out" }, 13.6);
+      tl.fromTo("#en-no", { opacity: 0, scale: 1.4 }, { opacity: 1, scale: 1, duration: 0.35, ease: "back.out(2)" }, 13.85);
+      tl.fromTo("#en-head", { opacity: 0, y: 40 }, { opacity: 1, y: 0, duration: 0.55, ease: "expo.out" }, 13.95);
+      // track card in
+      tl.fromTo("#en-card", { opacity: 0, x: -70, rotationY: 8, transformPerspective: 1200 }, { opacity: 1, x: 0, rotationY: 0, duration: 0.55, ease: "power3.out" }, 14.15);
+      tl.fromTo("#en-art", { opacity: 0, scale: 0.7 }, { opacity: 1, scale: 1, duration: 0.45, ease: "back.out(1.8)" }, 14.35);
+      // metadata stamps
+      tl.fromTo(".en-m", { opacity: 0, y: 18 }, { opacity: 1, y: 0, duration: 0.35, ease: "power2.out", stagger: 0.08 }, 14.55);
+      // analysis panel in
+      tl.fromTo(".analysis", { opacity: 0, x: 70 }, { opacity: 1, x: 0, duration: 0.55, ease: "power3.out" }, 14.4);
+      // NRG count up
+      const nrgC = { v: 0 };
+      tl.to(nrgC, { v: 7, duration: 1.0, ease: "power2.out", onUpdate: () => { document.getElementById("en-nrg").textContent = Math.round(nrgC.v); } }, 15.0);
+      // energy curve draw
+      const line = document.getElementById("en-line");
+      const len = line.getTotalLength();
+      line.style.strokeDasharray = len;
+      line.style.strokeDashoffset = len;
+      tl.fromTo("#en-line", { strokeDashoffset: len }, { strokeDashoffset: 0, duration: 1.3, ease: "power2.inOut" }, 15.0);
+      tl.fromTo("#en-area", { opacity: 0 }, { opacity: 1, duration: 0.6, ease: "power1.out" }, 16.0);
+      // stem bars fill (scaleX from data-w) — entrance only
+      document.querySelectorAll("#enrich .en-fill").forEach((el, i) => {
+        const w = parseFloat(el.dataset.w);
+        tl.fromTo(el, { scaleX: 0 }, { scaleX: w, duration: 0.6, ease: "power2.out" }, 15.4 + i * 0.12);
+      });
+      // stem ambient: glow overlay breathe (separate element, opacity only — no transform clash)
+      tl.fromTo("#enrich .en-glow", { opacity: 0.0 }, { opacity: 0.35, duration: 0.7, yoyo: true, repeat: 3, ease: "sine.inOut", stagger: 0.1 }, 16.4);
+
+      /* ============== SCENE 4 — SET BUILDER (19.6 – 27.0) ============== */
+      tl.fromTo("#set", { opacity: 0, scale: 1.08, filter: "blur(10px)" }, { opacity: 1, scale: 1, filter: "blur(0px)", duration: 0.5, ease: "expo.out" }, 19.6);
+      tl.fromTo("#set-no", { opacity: 0, scale: 1.4 }, { opacity: 1, scale: 1, duration: 0.35, ease: "back.out(2)" }, 19.85);
+      tl.fromTo("#set-head", { opacity: 0, y: 40 }, { opacity: 1, y: 0, duration: 0.55, ease: "expo.out" }, 19.95);
+      // GATHER — archetype card slides in, name pops, params stamp
+      tl.fromTo("#set-arche", { opacity: 0, x: -70 }, { opacity: 1, x: 0, duration: 0.55, ease: "power3.out" }, 20.15);
+      tl.fromTo("#set-arche .aname", { opacity: 0, y: 24 }, { opacity: 1, y: 0, duration: 0.5, ease: "back.out(1.6)" }, 20.4);
+      tl.fromTo("#set .sp", { opacity: 0, y: 18 }, { opacity: 1, y: 0, duration: 0.4, ease: "power2.out", stagger: 0.1 }, 20.6);
+      // SEARCH — pool of analysed tracks counts up (scored & sequenced)
+      const poolC = { v: 0 };
+      tl.to(poolC, { v: 4812, duration: 1.3, ease: "power2.out", onUpdate: () => { document.getElementById("set-pool").textContent = fmt(poolC.v); } }, 21.0);
+      // BUILD — graph panel in, curve draws slowly, area fills
+      tl.fromTo("#set-graph", { opacity: 0, x: 70 }, { opacity: 1, x: 0, duration: 0.55, ease: "power3.out" }, 21.4);
+      const setLine = document.getElementById("set-line");
+      const setLen = setLine.getTotalLength();
+      setLine.style.strokeDasharray = setLen;
+      setLine.style.strokeDashoffset = setLen;
+      tl.fromTo("#set-line", { strokeDashoffset: setLen }, { strokeDashoffset: 0, duration: 1.9, ease: "power1.inOut" }, 21.9);
+      tl.fromTo("#set-area", { opacity: 0 }, { opacity: 1, duration: 0.9, ease: "power1.out" }, 23.3);
+      // tracks drop onto the curve, left→right, trailing the draw
+      tl.fromTo("#set .snode", { xPercent: -50, yPercent: -50, scale: 0, opacity: 0 }, { xPercent: -50, yPercent: -50, scale: 1, opacity: 1, duration: 0.42, ease: "back.out(2.2)", stagger: 0.19 }, 22.1);
+      // phase labels resolve the shape
+      tl.fromTo("#set .phaselab span", { opacity: 0, y: 14 }, { opacity: 1, y: 0, duration: 0.4, ease: "power2.out", stagger: 0.08 }, 24.5);
+      // ambient: panel glow breathe + climax node pulse
+      tl.to("#set-graph", { boxShadow: "0 0 120px rgba(198,255,61,0.22)", duration: 1.5, yoyo: true, repeat: 1, ease: "sine.inOut" }, 24.9);
+      tl.to("#set-climax", { boxShadow: "0 0 38px rgba(198,255,61,1)", duration: 0.7, yoyo: true, repeat: 3, ease: "sine.inOut" }, 24.7);
+
+      /* ============== SCENE 5 — EXTENSION (26.6 – 32.4) ============== */
+      tl.fromTo("#ext", { opacity: 0, scale: 1.06, filter: "blur(8px)" }, { opacity: 1, scale: 1, filter: "blur(0px)", duration: 0.45, ease: "power3.out" }, 26.6);
+      tl.fromTo("#ext-work", { opacity: 0 }, { opacity: 0.06, duration: 0.8, ease: "power1.out" }, 26.8);
+      tl.fromTo("#ext-no", { opacity: 0, scale: 1.4 }, { opacity: 1, scale: 1, duration: 0.35, ease: "back.out(2)" }, 26.85);
+      tl.fromTo("#ext-head", { opacity: 0, y: 40 }, { opacity: 1, y: 0, duration: 0.55, ease: "expo.out" }, 26.95);
+      tl.fromTo("#ext-sub", { opacity: 0, y: 24 }, { opacity: 1, y: 0, duration: 0.5, ease: "power2.out" }, 27.15);
+      // PiP window detaches from the page and floats in (entrance on wrapper)
+      tl.fromTo("#ext-pipwrap", { opacity: 0, scale: 0.85, x: 60, y: 70 }, { opacity: 1, scale: 1, x: 0, y: 0, duration: 0.6, ease: "back.out(1.4)" }, 27.2);
+      // video internals
+      tl.fromTo("#ext-vwave span", { scaleY: 0, transformOrigin: "bottom" }, { scaleY: 1, duration: 0.5, ease: "power2.out", stagger: 0.015 }, 27.7);
+      tl.fromTo("#ext-play", { opacity: 0, scale: 0.5 }, { opacity: 1, scale: 1, duration: 0.45, ease: "back.out(2)" }, 27.7);
+      tl.fromTo("#ext-scrub", { scaleX: 0, transformOrigin: "left center" }, { scaleX: 0.44, duration: 0.7, ease: "power2.out" }, 27.9);
+      // tracklist materialises, current track lights up
+      tl.fromTo("#ext .thead", { opacity: 0 }, { opacity: 1, duration: 0.3 }, 27.9);
+      tl.fromTo("#ext .ext-row", { opacity: 0, x: 40 }, { opacity: 1, x: 0, duration: 0.4, ease: "power3.out", stagger: 0.12 }, 28.0);
+      tl.fromTo("#ext-now", { opacity: 0, scale: 0 }, { opacity: 1, scale: 1, duration: 0.4, ease: "back.out(3)" }, 28.6);
+      tl.fromTo("#ext-kbd", { opacity: 0, y: 24, scale: 0.92 }, { opacity: 1, y: 0, scale: 1, duration: 0.45, ease: "back.out(1.6)" }, 28.5);
+      // ambient: PiP gentle float (inner card), play pulse ring, now-marker blink
+      tl.to("#ext-pip", { y: -14, duration: 1.6, yoyo: true, repeat: 1, ease: "sine.inOut" }, 28.8);
+      tl.fromTo("#ext-pulse", { scale: 0.8, opacity: 0.55 }, { scale: 1.7, opacity: 0, duration: 1.2, repeat: 2, ease: "sine.out" }, 28.2);
+      tl.to("#ext-now", { opacity: 0.3, duration: 0.5, yoyo: true, repeat: 3, ease: "sine.inOut" }, 29.2);
+
+      /* ============== SCENE 6 — OUTRO (32.0 – 36.4) ============== */
+      tl.fromTo("#outro", { opacity: 0, scale: 1.06, filter: "blur(8px)" }, { opacity: 1, scale: 1, filter: "blur(0px)", duration: 0.5, ease: "power3.out" }, 32.0);
+      tl.fromTo("#ou-line", { opacity: 0, y: 30 }, { opacity: 1, y: 0, duration: 0.5, ease: "power2.out" }, 32.3);
+      tl.fromTo("#ou-dests span", { opacity: 0, y: 30, scale: 0.9 }, { opacity: 1, y: 0, scale: 1, duration: 0.45, ease: "back.out(1.6)", stagger: 0.1 }, 32.45);
+      tl.fromTo("#ou-mark", { opacity: 0, scale: 1.3 }, { opacity: 1, scale: 1, duration: 0.55, ease: "power4.out" }, 32.85);
+      tl.fromTo("#ou-tag", { opacity: 0, y: 24 }, { opacity: 1, y: 0, duration: 0.5, ease: "power2.out" }, 33.3);
+      tl.fromTo("#ou-term", { opacity: 0 }, { opacity: 1, duration: 0.4 }, 33.6);
+      tl.to("#ou-glow", { scale: 1.12, duration: 2.0, yoyo: true, repeat: 1, ease: "sine.inOut" }, 32.8);
+      // final scene fade-out (only allowed on last scene)
+      tl.to(["#ou-line", "#ou-dests", "#ou-term"], { opacity: 0, duration: 0.5, ease: "power2.in" }, 35.6);
+      tl.to(["#ou-mark", "#ou-tag"], { opacity: 0, duration: 0.6, ease: "power2.in" }, 35.8);
+
+      window.__timelines["main"] = tl;
+    </script>
+  </body>
+</html>

@@ -2,19 +2,16 @@
 
 Unified DJ toolkit. Builds a fully-analysed track library: pull tracks in from Apple Music, Beatport, and detected audio sources, progressively enrich each track with Beatport metadata and DJ Studio analysis (key/energy/cues/stems). Then build energy-sequenced sets, and push any stored set or SQL-curated subset to a Beatport chart/playlist or a rekordbox playlist.
 
+## Tour
+
+<img src="docs/promo/dj-demo/dj-demo.gif" alt="dj demo — sync · detect · enrich · build the set" width="100%">
+
 All tool-generated files live under `~/Music/dj/`:
 
-![dj storage layout under ~/Music/dj/](docs/diagrams/storage-layout.svg)
+<img src="docs/diagrams/storage-layout.svg" alt="dj storage layout under ~/Music/dj/" width="300">
 
 <!-- Diagram source: docs/diagrams/storage-layout.d2 — edit that and re-run scripts/build-diagrams.sh -->
 
-> **How to read this README.** Each command section is laid out the same way:
-> what it does, how to run it, the **Setup** you need to do once, and **Good to
-> know** — the tradeoffs and caveats worth understanding before you rely on it.
-> You don't need to know how the internals work; you do need the config and the
-> caveats, so those are called out explicitly.
-
----
 
 ## Setup
 
@@ -25,7 +22,7 @@ All tool-generated files live under `~/Music/dj/`:
 curl -fsSL https://raw.githubusercontent.com/baymac/dj/main/install.sh | bash
 
 # Or install a specific version:
-uv tool install git+https://github.com/baymac/dj.git@v0.1.6.1
+uv tool install git+https://github.com/baymac/dj.git@v0.1.6.3
 ```
 
 Requires **macOS** and [uv](https://astral.sh/uv/install.sh). After install, `dj` is on your PATH globally — no virtualenv activation needed.
@@ -79,7 +76,7 @@ These are the only "you must do X first" rules in the whole tool:
 
 ## Pipeline at a glance
 
-![dj enrichment pipeline: sources → enriched_tracks → analysis](docs/diagrams/pipeline.svg)
+<img src="docs/diagrams/pipeline.svg" alt="dj enrichment pipeline: sources → enriched_tracks → analysis" width="560">
 
 <!-- Diagram source: docs/diagrams/pipeline.d2 — edit that and re-run scripts/build-diagrams.sh -->
 
@@ -782,7 +779,7 @@ uv run pytest
 
 ## Package layout
 
-![dj package layout](docs/diagrams/package-layout.svg)
+<img src="docs/diagrams/package-layout.svg" alt="dj package layout" width="480">
 
 <!-- Diagram source: docs/diagrams/package-layout.d2 — edit that and re-run scripts/build-diagrams.sh -->
 
