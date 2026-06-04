@@ -287,6 +287,7 @@ uv run dj_cli.py detect topdjmixes https://www.topdjmixes.com/some-mix-page/
 - **SoundCloud handles three URL shapes automatically:** a **set** (`/sets/`) enumerates its tracks with no audio download; a **single track ≤15 min** is saved as one row (no scan); a **single track >15 min** (radio episodes, DJ mixes) gets a Shazam-by-chunks audio scan. Share-link tracking params (`?si=…`, `&utm_*`) are stripped for you. Personalized `/discover/` feeds need a user-bound login that isn't wired to a CLI command today.
 - **YouTube uses your browser's login cookies** (tries Brave → Chrome → Safari → Firefox, caches the working one for a week). If YouTube throws a bot-detection challenge, the tool discards the cache and re-extracts before retrying. If every browser fails, log into YouTube in one of them.
 - **Reddit / topdjmixes parse text, not audio** — they work on any post whose body has `Artist - Title` lines (position numbers, `[label]` brackets, and markdown links are stripped).
+- **1001tracklists timed exports skip the session header** — when you export a timed tracklist (timestamps present), the page title line ("DJ - Show Name YYYY-MM-DD") is automatically dropped so it doesn't appear as a spurious track. Plain-list exports where track titles happen to end in a release date (e.g. "Artist - Live Set 2024-12-31") are unaffected.
 
 ### Deleting a scan
 
