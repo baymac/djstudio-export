@@ -33,6 +33,13 @@ _W_PREFIX_RE = re.compile(r"^w/\s*", re.IGNORECASE)
 _ARTIST_JOINER_RE = re.compile(
     r"\s*(?:&|/|\+|,|\bvs\.?\b|\bx\b|\bft\.?\b|\bfeat\.?\b)\s*", re.IGNORECASE
 )
+# session header line: "DJ - Show Name YYYY-MM-DD". 1001tracklists (and similar)
+# exports prepend the page title as a pseudo-track; it has a ' - ' separator so it
+# parses as a track, but it carries no timestamp and ends in a bare ISO date. Real
+# tracks in a timed tracklist always have a timestamp, so a date-terminated,
+# timestamp-less line is the header, never a track. (Mirrors _HEADER_RE in
+# tracklists1001.py, which keys off the same shape to extract the session title.)
+_HEADER_LINE_RE = re.compile(r".+\s+\d{4}-(?:0[1-9]|1[0-2])-(?:0[1-9]|[12]\d|3[01])\s*$")
 # skip "ID – ID" placeholder lines
 _ID_LINE_RE = re.compile(r"^ID\s*[-–—]\s*ID$", re.IGNORECASE)
 # bare URLs
@@ -116,6 +123,9 @@ def extract_from_text(text: str) -> tuple[list[dict], list[str]]:
     seen: set[tuple[str, str]] = set()
     pos = 0
     last_ts: Optional[int] = None   # seconds of the most recent timestamped line
+    # Pre-scan: the header guard only makes sense for timed tracklists. A plain-list
+    # (no timestamps anywhere) must not silently drop tracks whose titles end in a date.
+    _is_timed = any(_extract_ts_s(l.strip()) is not None for l in text.splitlines())
 
     for raw in text.splitlines():
         raw = raw.strip()
@@ -126,6 +136,12 @@ def extract_from_text(text: str) -> tuple[list[dict], list[str]]:
         ts = _extract_ts_s(raw)
         if ts is not None:
             last_ts = ts
+
+        # Drop the session header ("DJ - Show Name YYYY-MM-DD"): no timestamp and
+        # ends in a bare ISO date → it's the page title, not a track.
+        # Guard only fires for timed tracklists; plain-list tracks may legally end in a date.
+        if _is_timed and ts is None and not is_overlay and _HEADER_LINE_RE.match(raw):
+            continue
         # w/ lines inherit the parent timestamp, non-w/ lines without a
         # timestamp get None (e.g. plain-list tracklists with no times)
         line_ts = last_ts if is_overlay else ts
