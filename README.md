@@ -4,7 +4,7 @@ Unified DJ toolkit. Builds a fully-analysed track library: pull tracks in from A
 
 ## Tour
 
-[![dj demo — sync · detect · enrich · build the set](docs/promo/dj-demo/poster.png)](docs/promo/dj-demo/renders/dj-demo.mp4)
+<video src="docs/promo/dj-demo/renders/dj-demo.mp4" poster="docs/promo/dj-demo/poster.png" controls width="100%"></video>
 
 All tool-generated files live under `~/Music/dj/`:
 
