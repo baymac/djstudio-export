@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.6.2] - 2026-06-04
+
+### Fixed
+- **Beatport remix matching** — `enrich metadata` now tries to find the specific remix version first even when falling back to a base-title search. Previously, the strip-remix fallback searched Beatport for the base title and immediately matched against it, potentially landing on "Original Mix" or "Extended Mix" when the actual "(Ben Böhmer Remix)" was also in those results.
+- **`[X Remix]`-style titles** — track titles that use square brackets for the remix tag (e.g. `Song [Ben Böhmer Remix]`, common on SoundCloud/YouTube uploads) are now included in the Beatport search query as searchable words, instead of being silently stripped. Stripping them was causing the wrong version to be enriched when the plain base track appeared in top results. Pure label/editorial tags like `[KEINEMUSIK]` or `[EXPERTS ONLY]` are still stripped.
+
 ## [0.1.6.1] - 2026-06-03
 
 ### Changed
