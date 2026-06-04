@@ -1,0 +1,11 @@
+{
+  "name": "dj-demo",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "npx --yes hyperframes@0.6.72 preview",
+    "check": "npx --yes hyperframes@0.6.72 lint && npx --yes hyperframes@0.6.72 validate && npx --yes hyperframes@0.6.72 inspect",
+    "render": "npx --yes hyperframes@0.6.72 render",
+    "publish": "npx --yes hyperframes@0.6.72 publish"
+  }
+}
