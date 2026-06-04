@@ -22,7 +22,7 @@ All tool-generated files live under `~/Music/dj/`:
 curl -fsSL https://raw.githubusercontent.com/baymac/dj/main/install.sh | bash
 
 # Or install a specific version:
-uv tool install git+https://github.com/baymac/dj.git@v0.1.6.1
+uv tool install git+https://github.com/baymac/dj.git@v0.1.6.3
 ```
 
 Requires **macOS** and [uv](https://astral.sh/uv/install.sh). After install, `dj` is on your PATH globally — no virtualenv activation needed.
