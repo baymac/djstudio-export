@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.6.4] - 2026-06-05
+
+### Fixed
+- **1001tracklists header line no longer parsed as a track** — exports prepend the page title ("DJ - Show Name YYYY-MM-DD") as the first line; the text parser now recognises and drops it in timed tracklists so it doesn't appear as a spurious track entry.
+- **Plain-list tracks ending in a release date are now kept** — the header guard is scoped to timed tracklists only, so a plain list that includes tracks like "Artist - Live Set 2024-12-31" is not silently dropped.
+
 ## [0.1.6.3] - 2026-06-04
 
 ### Changed
