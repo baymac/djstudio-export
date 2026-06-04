@@ -6,8 +6,6 @@ Unified DJ toolkit. Builds a fully-analysed track library: pull tracks in from A
 
 <img src="docs/promo/dj-demo/dj-demo.gif" alt="dj demo — sync · detect · enrich · build the set" width="100%">
 
-▶ [Watch with sound (HD)](docs/promo/dj-demo/renders/dj-demo.mp4)
-
 All tool-generated files live under `~/Music/dj/`:
 
 <img src="docs/diagrams/storage-layout.svg" alt="dj storage layout under ~/Music/dj/" width="300">
