@@ -84,6 +84,11 @@ def _artist_score(a: str, b: str) -> float:
 # artist–title pair is encoded in the title with an en/em dash.
 _EMBEDDED_ARTIST_RE = re.compile(r"^(.+?)\s+[–—]\s+(.+)$")
 
+_SQ_BRACKET_REMIX_RE = re.compile(
+    r"\[[^\]]*\b(?:remix|mix|edit|rework|dub|bootleg|mashup|version|vip|flip)\b[^\]]*\]",
+    re.I,
+)
+
 _REMIX_STRIP_RE = re.compile(
     r"\s*[\(\[][^\)\]]*\b(?:remix|mix|edit|rework|dub|bootleg|mashup|version|vip|flip)\b[^\)\]]*[\)\]]",
     re.I,
@@ -117,10 +122,21 @@ def split_mashup_variants(name: str, artist: str) -> list[tuple[str, str]]:
 
 def search_query(name: str) -> str:
     """Simplify a track title for Beatport search — strip feat and bracket noise,
-    keep the remix/edit name so the right version ranks higher."""
+    keep the remix/edit name so the right version ranks higher.
+
+    [] blocks containing remix/mix keywords (e.g. [Ben Böhmer Remix]) are expanded
+    to words so the remix is still searchable.  Pure label/editorial tags like
+    [KEINEMUSIK] or [EXPERTS ONLY] are stripped.  Orphaned brackets from malformed
+    double-bracket titles are cleaned up in the final pass.
+    """
     q = re.sub(r"\s*[\(\[]feat\.?[^\)\]]*[\)\]]", "", name, flags=re.I)
     q = _BARE_FEAT_RE.sub("", q)
-    q = re.sub(r"[\(\[\)\]]", " ", q)
+    q = re.sub(
+        r"\[[^\]]*\]",
+        lambda m: re.sub(r"[\[\]]", " ", m.group(0)) if _SQ_BRACKET_REMIX_RE.search(m.group(0)) else "",
+        q,
+    )
+    q = re.sub(r"[\[\]\(\)]", " ", q)  # expand () to words; clean any orphaned brackets
     return re.sub(r"\s+", " ", q).strip()
 
 
