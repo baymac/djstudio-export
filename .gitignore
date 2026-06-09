@@ -4,6 +4,10 @@ __pycache__/
 *.pyc
 *.json
 !package.json
+!package-lock.json
+!tsconfig.json
+!tsconfig.*.json
+*.tsbuildinfo
 .beatport_token
 logs/
 *.log
