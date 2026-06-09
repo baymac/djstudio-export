@@ -199,15 +199,28 @@ def _capture_all_playlists(playlist: str | None, limit: int, verbose: bool, dry_
 def _capture_favorites(limit: int, verbose: bool, dry_run: bool) -> None:
     console.print("Capturing [bold]Favourite Songs[/bold] from Apple Music…")
     rows = []
-    for pos, rec in enumerate(musickit.stream_favorite_tracks()):
+    seen: set[str] = set()
+    dupes = 0
+    for rec in musickit.stream_favorite_tracks():
+        # Favourite Songs is a loved-SET — a track loved twice carries no meaning,
+        # so collapse repeats here (unlike user playlists, where a repeated track
+        # can be intentional and replace_playlist preserves it). Reuse the DB's own
+        # identity function so this collapse and replace_playlist agree on what "the
+        # same track" is (and a pipe/space in artist or title can't false-collide).
+        cat = rec.get("catalog_id")
+        key = sync_db._dedup_key(cat, rec.get("artist"), rec.get("name"))
+        if key in seen:
+            dupes += 1
+            continue
+        seen.add(key)
         rows.append({
-            "native_track_id": rec.get("catalog_id"),
+            "native_track_id": cat,
             "native_url": rec.get("url"),
             "artist": rec.get("artist"),
             "title": rec.get("name"),
             "album": rec.get("album"),
             "playlist_name": "Favourite Songs",
-            "position": pos,
+            "position": len(rows),
         })
         if limit and len(rows) >= limit:
             break
@@ -215,8 +228,13 @@ def _capture_favorites(limit: int, verbose: bool, dry_run: bool) -> None:
     if dry_run:
         console.print(f"  [dim]would capture[/dim] Favourite Songs: {len(rows)} tracks")
         return
-    sync_db.replace_playlist(APP, FAVORITES_PID, rows)
-    console.print(f"[bold]Capture complete[/bold] — Favourite Songs: {len(rows)} tracks")
+    stats = sync_db.replace_playlist(APP, FAVORITES_PID, rows)
+    removed_part = f", {stats['removed']} removed" if stats["removed"] else ""
+    dupes_part = f", {dupes} duplicate{'s' if dupes != 1 else ''} collapsed" if dupes else ""
+    console.print(
+        f"[bold]Capture complete[/bold] — Favourite Songs: {stats['total']} tracks "
+        f"([green]+{stats['new']} new[/green], {stats['kept']} skipped{removed_part}{dupes_part})"
+    )
 
 
 def run_sync_spotify(
