@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.6.5] - 2026-06-09
+
+### Fixed
+- **Apple Music "Favourite Songs" no longer captures duplicates** — when the same track is loved twice in your collection, `dj sync music pull` now collapses it to a single row instead of storing it twice. Deduping uses the same track-identity rule as the rest of the sync store (catalog id, else artist + title), so a `|` in an artist or title can't cause a false merge.
+- **Favourites capture now reports new/skipped/duplicate counts** — the "Capture complete — Favourite Songs" line previously always printed the raw streamed total with no breakdown. It now shows `+N new, M skipped` (and `K duplicates collapsed` / `removed` when applicable), matching the per-playlist capture summary.
+
 ## [0.1.6.4] - 2026-06-05
 
 ### Fixed

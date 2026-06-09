@@ -44,6 +44,35 @@ def test_music_named_playlist_captures_playlists_only(monkeypatch):
     assert calls == ["playlists"]
 
 
+def test_favorites_collapses_duplicates(monkeypatch):
+    # Apple's Favourite Songs stream can return the same track twice; favorites is a
+    # loved-SET, so capture must dedupe before persisting (by catalog id, else artist+title).
+    stream = [
+        {"catalog_id": "1", "artist": "A", "name": "x", "album": "al"},
+        {"catalog_id": "2", "artist": "B", "name": "y", "album": "al"},
+        {"catalog_id": "1", "artist": "A", "name": "x", "album": "al"},   # dup by id
+        {"catalog_id": None, "artist": "C", "name": "z", "album": "al"},
+        {"catalog_id": None, "artist": " c ", "name": "Z", "album": "al"},  # dup by artist+title
+        # Pipe in title/artist must NOT false-collide: ("a|b","c") vs ("a","b|c")
+        # would collapse under a naive "artist|title" key but are distinct tracks.
+        {"catalog_id": None, "artist": "a|b", "name": "c", "album": "al"},
+        {"catalog_id": None, "artist": "a", "name": "b|c", "album": "al"},
+    ]
+    monkeypatch.setattr(cap.musickit, "stream_favorite_tracks", lambda: iter(stream))
+    persisted = {}
+    monkeypatch.setattr(cap.sync_db, "replace_playlist",
+                        lambda app, npid, rows, **k: persisted.update(rows=rows)
+                        or {"new": len(rows), "kept": 0, "removed": 0, "total": len(rows)})
+
+    cap._capture_favorites(limit=0, verbose=False, dry_run=False)
+
+    rows = persisted["rows"]
+    assert [r["native_track_id"] for r in rows] == ["1", "2", None, None, None]
+    assert [r["position"] for r in rows] == [0, 1, 2, 3, 4]  # positions re-numbered after collapse
+    assert [(r["artist"], r["title"]) for r in rows[2:]] == [
+        ("C", "z"), ("a|b", "c"), ("a", "b|c")]  # pipe tracks kept distinct
+
+
 def test_spotify_default_targets_playlists_and_liked(monkeypatch):
     captured = []
 
