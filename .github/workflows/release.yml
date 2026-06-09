@@ -47,7 +47,10 @@ jobs:
 
       - name: E2E smoke test — install wheel and check version
         run: |
-          uv tool install --force dist/*.whl
+          # Pin to a supported interpreter: pyproject requires >=3.11,<3.13.
+          # Python 3.13 dropped the stdlib `audioop` module (PEP 594) that
+          # shazamio/pydub import at load time, so `dj --help` crashes there.
+          uv tool install --force --python 3.12 dist/*.whl
           dj --version
           dj version
           # Smoke: help must work without copying assets or running npm
