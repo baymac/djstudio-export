@@ -56,6 +56,21 @@ def test_plain_list_track_ending_in_date_is_kept():
     assert skipped == []
 
 
+def test_id_placeholder_lines_skipped():
+    # "ID – ID" and "Artist – ID" are unidentified-track placeholders; neither
+    # should enter the track list. They land in skipped (not silently dropped)
+    # so the caller can surface them to the user.
+    raw = (
+        "[0:00] Max Styler & Pavel Petrov - ID\n"
+        "[3:00] ID - ID\n"
+        "[6:00] Fisher - Losing It\n"
+    )
+    tracks, skipped = extract_from_text(raw)
+    assert [(t["artist"], t["title"]) for t in tracks] == [("Fisher", "Losing It")]
+    assert any("Max Styler" in s for s in skipped)
+    assert any("ID - ID" in s for s in skipped)
+
+
 def test_overlay_line_matching_header_pattern_is_kept():
     # A "w/" overlay line that happens to end in an ISO date must NOT be
     # treated as a header — the is_overlay guard short-circuits the check.
