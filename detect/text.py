@@ -40,7 +40,8 @@ _ARTIST_JOINER_RE = re.compile(
 # timestamp-less line is the header, never a track. (Mirrors _HEADER_RE in
 # tracklists1001.py, which keys off the same shape to extract the session title.)
 _HEADER_LINE_RE = re.compile(r".+\s+\d{4}-(?:0[1-9]|1[0-2])-(?:0[1-9]|[12]\d|3[01])\s*$")
-# skip "ID – ID" placeholder lines
+# skip "ID – ID" and "Artist – ID" placeholder lines (title or artist alone being
+# "ID" means the track is unidentified; no point storing it)
 _ID_LINE_RE = re.compile(r"^ID\s*[-–—]\s*ID$", re.IGNORECASE)
 # bare URLs
 _URL_RE = re.compile(r"^https?://\S+$")
@@ -99,6 +100,8 @@ def _parse_line(line: str) -> Optional[dict]:
     artist = cleaned[: m.start()].strip()
     title = cleaned[m.end() :].strip()
     if not artist or not title:
+        return None
+    if artist.upper() == "ID" or title.upper() == "ID":
         return None
     if len(artist) > 250 or len(title) > 250:
         return None
